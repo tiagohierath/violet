@@ -1,0 +1,21 @@
+{
+    "comment": "Lilyfield soft: airbrush. Pressure sets the flow.",
+    "group": "lilyfield",
+    "parent_brush_name": "",
+    "settings": {
+        "anti_aliasing": {"base_value": 0.0, "inputs": {}},
+        "dabs_per_actual_radius": {"base_value": 3.0, "inputs": {}},
+        "dabs_per_basic_radius": {"base_value": 0.0, "inputs": {}},
+        "dabs_per_second": {"base_value": 0.0, "inputs": {}},
+        "eraser": {"base_value": 0.0, "inputs": {}},
+        "hardness": {"base_value": 0.12, "inputs": {}},
+        "opaque": {"base_value": 0.35, "inputs": {}},
+        "opaque_linearize": {"base_value": 0.9, "inputs": {}},
+        "opaque_multiply": {"base_value": 0.0, "inputs": {"pressure": [[0.0, 0.0], [1.0, 1.0]]}},
+        "paint_mode": {"base_value": 0.0, "inputs": {}},
+        "radius_logarithmic": {"base_value": 3.4, "inputs": {}},
+        "slow_tracking": {"base_value": 0.0, "inputs": {}},
+        "smudge": {"base_value": 0.0, "inputs": {}}
+    },
+    "version": 3
+}

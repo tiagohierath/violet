@@ -1,0 +1,37 @@
+[package]
+name = "lilyfield"
+version = "0.1.0"
+edition = "2024"
+default-run = "lilyfield"
+
+[dependencies]
+# "wgpu" keeps wgpu's GL backend next to Vulkan: older laptops without a
+# Vulkan driver must still start (decided 2026-10-05).
+eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "wayland", "default_fonts"] }
+hokusai-brush = "0.3.0"
+hokusai-core = "0.3.0"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+png = "0.18.1"
+raw-window-handle = "0.6.2"
+rustix = { version = "1", features = ["event"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+wayland-backend = "0.3.17"
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32.13", features = ["client"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+# Dependencies are optimized even in dev builds: the brush engine, PNG and
+# zip code are unusably slow unoptimized, and they rarely change.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# panic stays "unwind": a panicking save thread must not take the painting
+# down with it. Line tables stay so `perf` can attribute time to source.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+debug = "line-tables-only"
