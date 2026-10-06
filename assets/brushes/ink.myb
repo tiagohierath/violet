@@ -1,6 +1,6 @@
 {
-    "comment": "Lilyfield ink: hard round pen. Pressure sets the width, never the opacity.",
-    "group": "lilyfield",
+    "comment": "Violet ink: hard round pen. Pressure sets the width, never the opacity.",
+    "group": "violet",
     "parent_brush_name": "",
     "settings": {
         "anti_aliasing": {"base_value": 1.0, "inputs": {}},

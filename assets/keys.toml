@@ -1,0 +1,41 @@
+# Violet keybinds. This file is the only source of keybinds.
+#
+# Each line is  "chord" = "command"  or  "chord" = "command args".
+# Chords: a key name, optionally prefixed by ctrl+, shift+, alt+
+# (for example "ctrl+shift+z", "[", "f12", "escape").
+# Commands are the dotted names in src/commands.rs.
+#
+# Edit this file and restart violet. Lines that do not parse are
+# reported on stderr and skipped.
+
+[keys]
+"f1" = "ui.help"
+"ctrl+z" = "history.undo"
+"ctrl+shift+z" = "history.redo"
+"ctrl+y" = "history.redo"
+"ctrl+s" = "file.save"
+"ctrl+shift+s" = "file.save-as"
+"ctrl+o" = "file.open"
+"ctrl+n" = "file.new"
+"ctrl+e" = "file.export"
+"ctrl+q" = "app.quit"
+"ctrl+shift+n" = "layer.add"
+"[" = "brush.size-down"
+"]" = "brush.size-up"
+"i" = "brush.opacity-down"
+"o" = "brush.opacity-up"
+"b" = "brush.next"
+"s" = "brush.smoothing"
+"e" = "tool.eraser"
+"-" = "view.zoom-out"
+"=" = "view.zoom-in"
+"+" = "view.zoom-in"
+"1" = "view.zoom-100"
+"2" = "view.fit"
+"4" = "view.rotate-left"
+"6" = "view.rotate-right"
+"5" = "view.rotate-reset"
+"m" = "view.flip"
+"tab" = "ui.chrome"
+"f12" = "ui.perf"
+"escape" = "ui.dismiss"

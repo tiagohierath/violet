@@ -1,13 +1,17 @@
 [package]
-name = "lilyfield"
+name = "violet"
 version = "0.1.0"
 edition = "2024"
-default-run = "lilyfield"
+default-run = "violet"
+
+[[bin]]
+name = "violet"
+path = "src/main.rs"
 
 [dependencies]
 # "wgpu" keeps wgpu's GL backend next to Vulkan: older laptops without a
 # Vulkan driver must still start (decided 2026-10-05).
-eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "wayland", "default_fonts"] }
+eframe = { version = "0.36.2", default-features = false, features = ["glow", "wayland", "default_fonts"] }
 hokusai-brush = "0.3.0"
 hokusai-core = "0.3.0"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
@@ -16,6 +20,7 @@ raw-window-handle = "0.6.2"
 rustix = { version = "1", features = ["event"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+toml = "0.8"
 wayland-backend = "0.3.17"
 wayland-client = "0.31.15"
 wayland-protocols = { version = "0.32.13", features = ["client"] }
@@ -35,3 +40,12 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 debug = "line-tables-only"
+
+# Everyday build: release speed at runtime, seconds per rebuild. Fat LTO
+# re-optimizes every dependency on any edit, so it is for shipped builds only.
+# cargo build --profile fast  ->  target/fast/violet
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

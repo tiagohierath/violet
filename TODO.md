@@ -82,6 +82,31 @@ Each is a day's work now and a rewrite later. Not optional, not deferrable.
 - [ ] **UI audit by 1 agent** (asked 2026-10-05). Read-only; findings go to Tiago first.
 - [ ] **Make the app usable today and install it on Tiago's system so he can launch it** (asked 2026-10-05). Owner: session projects-f1 (Tiago's call), ahead of the rest of the restructure.
 - [x] **Audit the existing code with 3 agents** (asked 2026-10-05): correctness/safety of pen.rs, main.rs vs ARCHITECTURE.md rules, build/latency/Nix setup.
+- [x] **Switch renderer from wgpu to glow** (done 2026-10-05). Cargo.toml + src/main.rs, two lines.
+
+- [ ] **Optimization quick wins** (found 2026-10-05, audit by agent):
+  - `display.rs:100,143,253` — cache `paper_rgb(doc.paper_linear())` as a field on `Display`; currently computed 2-3x per frame
+  - `display.rs:104` — `.drain().collect()` allocates a `Vec<TileKey>` every drawing frame; replace with a reused `Vec` field drained in-place
+  - `history.rs:189` — opacity undo calls `.keys().copied().collect()` over every tile in the layer; make it lazy (dirty the whole layer without allocating)
+  - CI only: `lto = "thin"` + `codegen-units = 4` in a `[profile.release-ci]` profile
+
+- [ ] **Heavily improve the UI layout: "it's terrible"** (Tiago, 2026-10-05, after first real test). One agent.
+- [ ] **Confirm before leaving or starting a new drawing** (Tiago, 2026-10-05: "otherwise you just delete your drawings").
+- [ ] **A proper vertical tool bar on the left, with icons** (Tiago, 2026-10-05). Given to the layout agent.
+- [ ] **A proper config/settings screen** (Tiago, 2026-10-05). One agent. Includes the obvious options, e.g. **new file asks for dimensions**.
+      **Decided 2026-10-05 (Tiago): the settings screen edits the config file.** This replaces "the app never writes config". The file in ~/.config/violet/ stays the single source of truth and stays hand-editable; if Nix makes it read-only, the screen shows the values read-only.
+- [ ] **Explore UI and find good rules** (Tiago, 2026-10-05). One agent; rules go in docs/ui.md (same place as Pictogrep's blueprint).
+- [ ] **A screen to see all drawings** (Tiago, 2026-10-05). One agent. ("and settings of course": the settings screen above.)
+- [ ] **BUG: Shift+Plus finds no command** (found 2026-10-05 by the readability agent): egui 0.36 names the key "Plus", all letters, so `Keymap::lookup`'s "symbols ignore shift" check never fires. Test `keymap::tests::redo_needs_shift_undo_does_not` fails.
+- [ ] **Make the code more readable; humans will audit it later** (asked 2026-10-05). One agent. No behavior changes.
+
+- [x] **BUG: brush stops working after switching colors** (Tiago, 2026-10-05: "it works now"). Pen-to-egui mirroring moved into `App::pen_to_egui` so tests drive the real path; `pen_paints_after_picking_a_color_in_the_square` and `mouse_picks_a_color_in_the_square_then_paints` pass.
+- [ ] **UI reference from Tiago, 2026-10-05 ("use this")**: dark panel with a hue ring around a saturation/value square, a hex field top right, a row of brush slots with icons and numbers, and labeled sliders with values on the right (Size, Min size, Flow, Opacity, Stabilizer, Tip shape). Conflict to resolve: the ring and round slot buttons are round, but the fixed rule is no rounded corners. Gray labels also conflict with the no-gray-text rule. (Tiago, 2026-10-05, first test of the installed build).
+
+- [ ] **Fast everyday build** (asked 2026-10-05: long builds break flow). `[profile.fast]` in Cargo.toml (release minus LTO, 16 codegen units, incremental); the installed `~/.local/bin/violet` runs `target/fast/violet`. Fat LTO stays in `[profile.release]` for shipped builds only.
+
+- [ ] **No metal/reflective/animated/particle visuals, ever** (decided 2026-10-05). GPU is allowed only for raw performance (tile upload, layer compositing speed). Never for aesthetics. No complex shader-driven brushes. The app must feel instant and invisible.
+
 - [ ] **Milestone one, step by step** (asked 2026-10-05; "oneshot" dropped
       mid-turn for "be efficient" and "always take the best decision for long
       term"). Steps 1 to 7, each verified before the next: startup probe,
@@ -95,6 +120,9 @@ Each is a day's work now and a rewrite later. Not optional, not deferrable.
       mutation, undo/redo, rendering, egui frame time, allocations per frame,
       save/load, draw calls, GPU upload. Shown in a summoned overlay, plus a
       headless benchmark binary so a slow laptop can report real numbers.
+- [ ] **One very, very high leverage UI action, done** (asked 2026-10-05,
+      replacing "complete ui on lilyfield" mid-turn: "just find one very very
+      high leverage action and do it").
 
 ## Build order
 
@@ -480,3 +508,11 @@ Next steps, in order:
 - [ ] Move rasterization off the UI thread
 - [ ] Rayon over tiles, once a brush is big enough to need it
 - [ ] SIMD, against a profile, never before one
+
+## Today (2026-10-06)
+- [x] **Geist Sans for the whole UI** (Tiago, 2026-10-06). Embedded Geist-Regular and Geist-Bold (nixpkgs geist-font 1.5.0, OFL-1.1) replace Liberation Sans in `src/theme.rs`. Liberation files kept on disk, no longer used.
+- [x] **Increase/decrease steps are logarithmic, not linear** (Tiago, 2026-10-06). Brush size and opacity keys step multiplicatively (x1.25 / x0.8). Brush opacity and layer opacity sliders map on a log scale from 0.01 to 1 (`opacity_position` in `src/chrome.rs`). Size was already log. Full test suite passes.
+- [x] **One canonical keybind file** (Tiago, 2026-10-06). `~/.config/violet/keys.toml` is the only source of keybinds: the built-in table in `src/keymap.rs` is gone. Written from `assets/keys.toml` on first launch if missing. Invalid lines are reported on stderr and skipped. Edits apply live (polled every 300ms, no restart), like a Neovim config. Tests: `keymap::tests` (3 pass).
+- [ ] **Fix violet enough to draw on it today** (Tiago, 2026-10-06). Smallest working fix; no restructure.
+- [x] Launch diagnosed 2026-10-06: running ./target/debug/violet outside `nix develop` fails with WinitEventLoop NoWaylandLib (libwayland not on library path). Inside `nix develop -c cargo run` it stays running. Launch via `nix develop -c cargo run`.
+- [x] Fuzzel launch fixed 2026-10-06: ~/.local/bin/violet builds target/fast/violet if missing, then runs it. Confirmed opening by Tiago.

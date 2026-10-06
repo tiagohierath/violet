@@ -7,12 +7,17 @@
 //! environment variable lookup, which cost more than the pixels on small
 //! brushes. Dabs that need lock-alpha, colorize, posterize, pigment mode or
 //! the eraser setting still go through hokusai's `draw_dab_default`.
+//!
+//! Short names in the ported helpers (`rr`, `cs`, `sn`, `opa_a`) are
+//! libmypaint's, kept so the code can be checked against it line by line.
 
 use hokusai_core::surface::{Dab, TiledSurface};
 use hokusai_core::tile::TILE_SIZE;
 
 use crate::compositor::ONE;
 
+/// Whether `draw` can paint this dab, i.e. it uses none of the modes only
+/// hokusai implements.
 pub fn is_plain(dab: &Dab) -> bool {
     dab.lock_alpha <= 0.0
         && dab.colorize <= 0.0
@@ -21,6 +26,7 @@ pub fn is_plain(dab: &Dab) -> bool {
         && dab.alpha_eraser >= 1.0
 }
 
+/// Opacity at squared normalized radius `rr`: libmypaint's hardness falloff.
 #[inline]
 fn opa_at(rr: f32, hardness: f32) -> f32 {
     if rr > 1.0 {
@@ -36,6 +42,8 @@ fn opa_at(rr: f32, hardness: f32) -> f32 {
     }
 }
 
+/// Squared normalized distance from pixel (`px`, `py`) to the dab center
+/// (`x`, `y`), in the dab's rotated, squashed frame. 1.0 is the edge.
 #[allow(clippy::too_many_arguments)]
 #[inline]
 fn rr_at(px: f32, py: f32, x: f32, y: f32, aspect: f32, cs: f32, sn: f32, inv_r2: f32) -> f32 {
@@ -65,6 +73,7 @@ fn closest_point_to_line(lx: f32, ly: f32, px: f32, py: f32) -> (f32, f32) {
     (lx * t, ly * t)
 }
 
+/// `rr_at` with libmypaint's sub-pixel antialiasing, for small radii.
 #[allow(clippy::too_many_arguments)]
 #[inline]
 fn rr_at_aa(
@@ -134,14 +143,15 @@ pub fn draw<S: TiledSurface + ?Sized>(surface: &mut S, dab: &Dab) -> bool {
         -1.0
     };
     let fringe = radius + 1.0;
-    let ts = TILE_SIZE as i32;
-    let tx0 = ((dab.x - fringe).floor() as i32).div_euclid(ts);
-    let ty0 = ((dab.y - fringe).floor() as i32).div_euclid(ts);
-    let tx1 = ((dab.x + fringe).floor() as i32).div_euclid(ts);
-    let ty1 = ((dab.y + fringe).floor() as i32).div_euclid(ts);
+    let tile_size = TILE_SIZE as i32;
+    // Range of tiles the dab's bounding box covers.
+    let tx0 = ((dab.x - fringe).floor() as i32).div_euclid(tile_size);
+    let ty0 = ((dab.y - fringe).floor() as i32).div_euclid(tile_size);
+    let tx1 = ((dab.x + fringe).floor() as i32).div_euclid(tile_size);
+    let ty1 = ((dab.y + fringe).floor() as i32).div_euclid(tile_size);
 
-    let c = dab.color;
-    let src = [c.r, c.g, c.b].map(|v| (v.clamp(0.0, 1.0) * ONE as f32) as u32);
+    let color = dab.color;
+    let src = [color.r, color.g, color.b].map(|v| (v.clamp(0.0, 1.0) * ONE as f32) as u32);
     let opacity = (dab.opaque.clamp(0.0, 1.0) * ONE as f32) as u32;
     let hardness = dab.hardness.clamp(0.0, 1.0);
     let inv_r2 = 1.0 / (radius * radius);
@@ -149,20 +159,22 @@ pub fn draw<S: TiledSurface + ?Sized>(surface: &mut S, dab: &Dab) -> bool {
     let mut painted = false;
     for ty in ty0..=ty1 {
         for tx in tx0..=tx1 {
-            let (ox, oy) = ((tx * ts) as f32, (ty * ts) as f32);
+            // Tile origin in document pixels.
+            let (ox, oy) = ((tx * tile_size) as f32, (ty * tile_size) as f32);
             // The dab's bounding box always touches its corner tiles; skip
             // the ones the disc itself cannot reach, so no empty buffer
             // tile is allocated and later committed for nothing.
-            let nx = dab.x.clamp(ox, ox + ts as f32) - dab.x;
-            let ny = dab.y.clamp(oy, oy + ts as f32) - dab.y;
-            if nx * nx + ny * ny > fringe * fringe {
+            let nearest_dx = dab.x.clamp(ox, ox + tile_size as f32) - dab.x;
+            let nearest_dy = dab.y.clamp(oy, oy + tile_size as f32) - dab.y;
+            if nearest_dx * nearest_dx + nearest_dy * nearest_dy > fringe * fringe {
                 continue;
             }
+            // Dab center, and the pixel range it covers, in tile-local pixels.
             let (xl, yl) = (dab.x - ox, dab.y - oy);
             let lx0 = ((xl - fringe).floor() as i32).max(0);
             let ly0 = ((yl - fringe).floor() as i32).max(0);
-            let lx1 = ((xl + fringe).floor() as i32).min(ts - 1);
-            let ly1 = ((yl + fringe).floor() as i32).min(ts - 1);
+            let lx1 = ((xl + fringe).floor() as i32).min(tile_size - 1);
+            let ly1 = ((yl + fringe).floor() as i32).min(tile_size - 1);
             if lx0 > lx1 || ly0 > ly1 {
                 continue;
             }
@@ -184,11 +196,11 @@ pub fn draw<S: TiledSurface + ?Sized>(surface: &mut S, dab: &Dab) -> bool {
                     }
                     let opa_a = mask * opacity / ONE;
                     let opa_b = ONE - opa_a;
-                    let p = &mut row[xp as usize];
-                    p[3] = (opa_a + opa_b * p[3] as u32 / ONE) as u16;
-                    p[0] = ((opa_a * src[0] + opa_b * p[0] as u32) / ONE) as u16;
-                    p[1] = ((opa_a * src[1] + opa_b * p[1] as u32) / ONE) as u16;
-                    p[2] = ((opa_a * src[2] + opa_b * p[2] as u32) / ONE) as u16;
+                    let px = &mut row[xp as usize];
+                    px[3] = (opa_a + opa_b * px[3] as u32 / ONE) as u16;
+                    px[0] = ((opa_a * src[0] + opa_b * px[0] as u32) / ONE) as u16;
+                    px[1] = ((opa_a * src[1] + opa_b * px[1] as u32) / ONE) as u16;
+                    px[2] = ((opa_a * src[2] + opa_b * px[2] as u32) / ONE) as u16;
                 }
             }
             surface.tile_request_end(tx, ty);

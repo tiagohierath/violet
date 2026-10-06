@@ -31,10 +31,13 @@ pub struct StrokePoint {
 /// The scratch buffer. Tiles outside the document are routed to one
 /// throwaway tile, so a stroke off the edge allocates nothing.
 pub struct Scratch {
+    /// The flag is set while the key sits in `dirty`, so it is listed once.
     tiles: HashMap<TileKey, (Box<TilePixels>, bool)>,
     dirty: Vec<TileKey>,
+    /// The document's size in tiles (`Document::tiles_across`).
     bounds: (i32, i32),
     trash: Box<TilePixels>,
+    /// Dabs drawn so far in this stroke.
     pub dabs: u64,
 }
 
@@ -60,9 +63,9 @@ impl Scratch {
     /// Tiles touched since the last call.
     pub fn take_dirty(&mut self) -> Vec<TileKey> {
         let dirty = std::mem::take(&mut self.dirty);
-        for k in &dirty {
-            if let Some(t) = self.tiles.get_mut(k) {
-                t.1 = false;
+        for key in &dirty {
+            if let Some((_, listed)) = self.tiles.get_mut(key) {
+                *listed = false;
             }
         }
         dirty
@@ -74,10 +77,7 @@ impl TiledSurface for Scratch {
         if tx < 0 || ty < 0 || tx >= self.bounds.0 || ty >= self.bounds.1 {
             return &mut self.trash;
         }
-        let entry = self
-            .tiles
-            .entry((tx, ty))
-            .or_insert_with(|| (compositor::new_tile(), false));
+        let entry = self.tiles.entry((tx, ty)).or_insert_with(|| (compositor::new_tile(), false));
         if !entry.1 {
             entry.1 = true;
             self.dirty.push((tx, ty));
@@ -101,7 +101,9 @@ impl TiledSurface for Scratch {
     }
 }
 
+/// The stroke being painted right now.
 pub struct LiveStroke {
+    /// Id of the layer it will land on.
     pub layer: u64,
     pub blend: StrokeBlend,
     /// fix15
@@ -109,11 +111,18 @@ pub struct LiveStroke {
     pub scratch: Scratch,
     brush: Brush,
     state: BrushState,
+    /// The previous sample, for the time delta hokusai wants.
     last: Option<StrokePoint>,
 }
 
 impl LiveStroke {
-    pub fn new(brush: Brush, layer: u64, blend: StrokeBlend, opacity: f32, bounds: (i32, i32)) -> Self {
+    pub fn new(
+        brush: Brush,
+        layer: u64,
+        blend: StrokeBlend,
+        opacity: f32,
+        bounds: (i32, i32),
+    ) -> Self {
         Self {
             layer,
             blend,
@@ -125,20 +134,21 @@ impl LiveStroke {
         }
     }
 
+    /// Feeds samples to the brush, which draws dabs into the scratch buffer.
     pub fn extend(&mut self, points: &[StrokePoint]) {
-        for p in points {
-            let dtime = self.last.map_or(0.0, |l| (p.time - l.time).max(0.0));
+        for point in points {
+            let dtime = self.last.map_or(0.0, |last| (point.time - last.time).max(0.0));
             self.brush.stroke_to(
                 &mut self.state,
                 &mut self.scratch,
-                p.x,
-                p.y,
-                p.pressure,
-                p.xtilt,
-                p.ytilt,
+                point.x,
+                point.y,
+                point.pressure,
+                point.xtilt,
+                point.ytilt,
                 dtime,
             );
-            self.last = Some(*p);
+            self.last = Some(*point);
         }
     }
 
@@ -147,10 +157,10 @@ impl LiveStroke {
     pub fn finish(&mut self) {
         self.brush.finish_stroke(&mut self.state, &mut self.scratch);
         if self.scratch.dabs == 0
-            && let Some(p) = self.last
+            && let Some(point) = self.last
         {
-            let d = tap_dab(&self.brush, p);
-            self.scratch.draw_dab(&d);
+            let tap = tap_dab(&self.brush, point);
+            self.scratch.draw_dab(&tap);
         }
     }
 
@@ -174,7 +184,7 @@ impl LiveStroke {
                     continue;
                 }
                 match after {
-                    Some(t) => layer.tiles.insert(key, t),
+                    Some(tile) => layer.tiles.insert(key, tile),
                     None => layer.tiles.remove(&key),
                 };
                 changes.push(Change { layer: self.layer, key, tile: before });
@@ -186,34 +196,37 @@ impl LiveStroke {
 
 /// The dab a stationary tap produces: the brush evaluated at the tap's
 /// pressure with every other input at rest.
-fn tap_dab(brush: &Brush, p: StrokePoint) -> Dab {
-    let eval = |s: BrushSetting| {
-        let v = brush.get(s);
-        v.base_value
-            + v.inputs
+fn tap_dab(brush: &Brush, point: StrokePoint) -> Dab {
+    // A setting's value with only its pressure mappings applied.
+    let eval = |setting: BrushSetting| {
+        let value = brush.get(setting);
+        value.base_value
+            + value
+                .inputs
                 .iter()
-                .filter(|m| m.input == BrushInput::Pressure)
-                .map(|m| m.eval(p.pressure))
+                .filter(|mapping| mapping.input == BrushInput::Pressure)
+                .map(|mapping| mapping.eval(point.pressure))
                 .sum::<f32>()
     };
+    // An unset opaque_multiply means "no effect", not zero.
     let multiply = {
-        let v = brush.get(BrushSetting::OpaqueMultiply);
-        if v.base_value == 0.0 && v.inputs.is_empty() {
+        let value = brush.get(BrushSetting::OpaqueMultiply);
+        if value.base_value == 0.0 && value.inputs.is_empty() {
             1.0
         } else {
             eval(BrushSetting::OpaqueMultiply).clamp(0.0, 1.0)
         }
     };
-    let c = hsv_to_rgb(Hsv {
+    let rgb = hsv_to_rgb(Hsv {
         h: brush.get(BrushSetting::ColorH).base_value,
         s: brush.get(BrushSetting::ColorS).base_value,
         v: brush.get(BrushSetting::ColorV).base_value,
     });
     Dab {
-        x: p.x,
-        y: p.y,
+        x: point.x,
+        y: point.y,
         radius: eval(BrushSetting::Radius).exp().clamp(0.2, 1000.0),
-        color: RgbaF32::new(c.r, c.g, c.b, 1.0),
+        color: RgbaF32::new(rgb.r, rgb.g, rgb.b, 1.0),
         opaque: (eval(BrushSetting::Opaque) * multiply).clamp(0.0, 1.0),
         hardness: eval(BrushSetting::Hardness).clamp(0.0, 1.0),
         alpha_eraser: 1.0,

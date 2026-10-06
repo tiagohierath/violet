@@ -7,10 +7,14 @@ use std::sync::{Arc, OnceLock};
 
 use hokusai_core::tile::{TILE_SIZE, TilePixels};
 
+/// 1.0 in fix15.
 pub const ONE: u32 = 1 << 15;
+/// Tile side in pixels.
 pub const N: usize = TILE_SIZE;
+/// Pixels in one tile.
 pub const TILE_PX: usize = N * N;
 
+/// One pixel: premultiplied linear RGBA, fix15.
 pub type Px = [u16; 4];
 
 /// fix15 multiply with libmypaint's rounding.
@@ -19,6 +23,7 @@ pub fn mul(a: u32, b: u32) -> u32 {
     (a * b + (1 << 14)) >> 15
 }
 
+/// A fully transparent tile.
 pub fn new_tile() -> Box<TilePixels> {
     // SAFETY: an all-zero bit pattern is a valid array of u16.
     unsafe { Box::<TilePixels>::new_zeroed().assume_init() }
@@ -30,6 +35,7 @@ pub fn new_shared_tile() -> Arc<TilePixels> {
     unsafe { Arc::<TilePixels>::new_zeroed().assume_init() }
 }
 
+/// A tile's rows as one flat slice, row-major.
 #[inline]
 pub fn pixels(tile: &TilePixels) -> &[Px] {
     tile.as_flattened()
@@ -48,17 +54,17 @@ pub enum StrokeBlend {
 /// runs once per pixel per stroke and overlapping dabs never double-darken.
 #[inline]
 pub fn apply_stroke(dst: Px, src: Px, opacity: u32, blend: StrokeBlend) -> Px {
-    let sa = mul(src[3] as u32, opacity);
-    if sa == 0 {
+    let src_alpha = mul(src[3] as u32, opacity);
+    if src_alpha == 0 {
         return dst;
     }
-    let keep = ONE - sa;
+    let keep = ONE - src_alpha;
     match blend {
         StrokeBlend::Normal => [
             (mul(src[0] as u32, opacity) + mul(dst[0] as u32, keep)).min(ONE) as u16,
             (mul(src[1] as u32, opacity) + mul(dst[1] as u32, keep)).min(ONE) as u16,
             (mul(src[2] as u32, opacity) + mul(dst[2] as u32, keep)).min(ONE) as u16,
-            (sa + mul(dst[3] as u32, keep)).min(ONE) as u16,
+            (src_alpha + mul(dst[3] as u32, keep)).min(ONE) as u16,
         ],
         StrokeBlend::Erase => dst.map(|c| mul(c as u32, keep) as u16),
     }
@@ -76,9 +82,11 @@ pub fn over(src: Px, dst: Px) -> Px {
     ]
 }
 
+/// Every channel times a fix15 factor; a premultiplied pixel at `factor`
+/// opacity.
 #[inline]
-pub fn scale(p: Px, f: u32) -> Px {
-    p.map(|c| mul(c as u32, f) as u16)
+pub fn scale(p: Px, factor: u32) -> Px {
+    p.map(|c| mul(c as u32, factor) as u16)
 }
 
 /// The tile left behind when a finished stroke is composited onto `base`.
@@ -93,14 +101,15 @@ pub fn commit_tile(
     valid: (usize, usize),
 ) -> Option<Arc<TilePixels>> {
     let mut out = new_shared_tile();
-    let o = Arc::get_mut(&mut out).expect("freshly allocated tile is unique");
+    let out_px = Arc::get_mut(&mut out).expect("freshly allocated tile is unique");
+    // OR of every alpha: nonzero iff any pixel has coverage.
     let mut alpha = 0u16;
     for y in 0..valid.1 {
         for x in 0..valid.0 {
-            let d = base.map_or([0; 4], |b| b[y][x]);
-            let p = apply_stroke(d, scratch[y][x], opacity, blend);
-            alpha |= p[3];
-            o[y][x] = p;
+            let under = base.map_or([0; 4], |b| b[y][x]);
+            let px = apply_stroke(under, scratch[y][x], opacity, blend);
+            alpha |= px[3];
+            out_px[y][x] = px;
         }
     }
     (alpha != 0).then_some(out)
@@ -121,23 +130,25 @@ pub struct LayerTile<'a> {
 pub fn flatten<'a>(out: &mut [Px], layers: impl IntoIterator<Item = LayerTile<'a>>) -> bool {
     let out = &mut out[..TILE_PX];
     let mut first = true;
-    for l in layers {
-        if l.tile.is_none() && l.stroke.is_none() {
+    for layer in layers {
+        if layer.tile.is_none() && layer.stroke.is_none() {
             continue;
         }
-        let tile = l.tile.map(pixels);
-        let stroke = l.stroke.map(|(s, op, blend)| (pixels(s), op, blend));
+        let tile = layer.tile.map(pixels);
+        let stroke = layer.stroke.map(|(s, op, blend)| (pixels(s), op, blend));
         for i in 0..TILE_PX {
             let mut p = match tile {
                 Some(t) => t[i],
                 None => [0; 4],
             };
-            if let Some((s, op, blend)) = stroke {
-                p = apply_stroke(p, s[i], op, blend);
+            if let Some((stroke_px, op, blend)) = stroke {
+                p = apply_stroke(p, stroke_px[i], op, blend);
             }
-            if l.opacity < ONE {
-                p = scale(p, l.opacity);
+            if layer.opacity < ONE {
+                p = scale(p, layer.opacity);
             }
+            // The first layer with content is copied, not composited, so
+            // `out` never needs clearing.
             out[i] = if first { p } else { over(p, out[i]) };
         }
         first = false;
@@ -148,9 +159,7 @@ pub fn flatten<'a>(out: &mut [Px], layers: impl IntoIterator<Item = LayerTile<'a
 /// Flattened value of one pixel; `layers` yields `(pixel, layer opacity)`
 /// bottom first.
 pub fn flatten_px(layers: impl IntoIterator<Item = (Px, u32)>) -> Px {
-    layers
-        .into_iter()
-        .fold([0; 4], |acc, (p, op)| over(scale(p, op), acc))
+    layers.into_iter().fold([0; 4], |acc, (p, op)| over(scale(p, op), acc))
 }
 
 /// Premultiplied linear pixels to opaque sRGB over the paper, for display
@@ -160,8 +169,8 @@ pub fn to_display(src: &[Px], paper: [u16; 3], mut put: impl FnMut(usize, [u8; 3
     let lut = lut_srgb8();
     for (i, p) in src.iter().enumerate() {
         let keep = ONE - p[3] as u32;
-        let ch = |c: usize| lut[(p[c] as u32 + mul(paper[c] as u32, keep)).min(ONE) as usize];
-        put(i, [ch(0), ch(1), ch(2)]);
+        let channel = |c: usize| lut[(p[c] as u32 + mul(paper[c] as u32, keep)).min(ONE) as usize];
+        put(i, [channel(0), channel(1), channel(2)]);
     }
 }
 
@@ -174,14 +183,16 @@ pub fn paper_rgb(paper: [u16; 3]) -> [u8; 3] {
 /// 2x box filter in premultiplied linear light, which is the only space
 /// where averaging is correct. `src` is `n` by `n`.
 pub fn downsample(src: &[Px], n: usize, dst: &mut [Px]) {
-    let h = n / 2;
-    for y in 0..h {
-        let r0 = &src[2 * y * n..2 * y * n + n];
-        let r1 = &src[(2 * y + 1) * n..(2 * y + 1) * n + n];
-        for x in 0..h {
-            let (a, b, c, d) = (r0[2 * x], r0[2 * x + 1], r1[2 * x], r1[2 * x + 1]);
-            dst[y * h + x] = [0, 1, 2, 3].map(|k| {
-                ((a[k] as u32 + b[k] as u32 + c[k] as u32 + d[k] as u32 + 2) >> 2) as u16
+    let half = n / 2;
+    for y in 0..half {
+        let row0 = &src[2 * y * n..2 * y * n + n];
+        let row1 = &src[(2 * y + 1) * n..(2 * y + 1) * n + n];
+        for x in 0..half {
+            // The 2x2 block: a b on the top row, c d below.
+            let (a, b, c, d) = (row0[2 * x], row0[2 * x + 1], row1[2 * x], row1[2 * x + 1]);
+            dst[y * half + x] = [0, 1, 2, 3].map(|k| {
+                let sum = a[k] as u32 + b[k] as u32 + c[k] as u32 + d[k] as u32;
+                ((sum + 2) >> 2) as u16
             });
         }
     }
@@ -199,9 +210,7 @@ pub fn linear_to_srgb(c: f64) -> f64 {
 fn lut_srgb8() -> &'static [u8] {
     static LUT: OnceLock<Box<[u8]>> = OnceLock::new();
     LUT.get_or_init(|| {
-        (0..=ONE)
-            .map(|i| (linear_to_srgb(i as f64 / ONE as f64) * 255.0).round() as u8)
-            .collect()
+        (0..=ONE).map(|i| (linear_to_srgb(i as f64 / ONE as f64) * 255.0).round() as u8).collect()
     })
 }
 
@@ -226,6 +235,7 @@ fn lut_linear() -> &'static [u16] {
 }
 
 pub fn srgb8_to_fix15(c: u8) -> u16 {
+    // 257 widens u8 to u16 exactly (255 * 257 = 65535).
     lut_linear()[c as usize * 257]
 }
 
@@ -234,22 +244,24 @@ pub fn srgb8_to_fix15(c: u8) -> u16 {
 /// fix15 step near white and exactly elsewhere.
 pub fn to_file_px(p: Px) -> [u16; 4] {
     let lut = lut_srgb16();
-    let a = p[3] as u32;
-    if a == 0 {
+    let alpha = p[3] as u32;
+    if alpha == 0 {
         return [0; 4];
     }
-    let straight = |c: u16| lut[((c as u32 * ONE + a / 2) / a).min(ONE) as usize];
-    [straight(p[0]), straight(p[1]), straight(p[2]), ((a * 65535 + ONE / 2) / ONE) as u16]
+    let straight = |c: u16| lut[((c as u32 * ONE + alpha / 2) / alpha).min(ONE) as usize];
+    let alpha16 = ((alpha * 65535 + ONE / 2) / ONE) as u16;
+    [straight(p[0]), straight(p[1]), straight(p[2]), alpha16]
 }
 
+/// The inverse of `to_file_px`.
 pub fn from_file_px(p: [u16; 4]) -> Px {
     let lut = lut_linear();
-    let a = (p[3] as u32 * ONE + 32767) / 65535;
-    if a == 0 {
+    let alpha = (p[3] as u32 * ONE + 32767) / 65535;
+    if alpha == 0 {
         return [0; 4];
     }
-    let pre = |c: u16| mul(lut[c as usize] as u32, a).min(a) as u16;
-    [pre(p[0]), pre(p[1]), pre(p[2]), a as u16]
+    let premultiply = |c: u16| mul(lut[c as usize] as u32, alpha).min(alpha) as u16;
+    [premultiply(p[0]), premultiply(p[1]), premultiply(p[2]), alpha as u16]
 }
 
 #[cfg(test)]

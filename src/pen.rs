@@ -15,7 +15,7 @@ use rustix::event::{PollFd, PollFlags, Timespec};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 use wayland_backend::client::{Backend, ObjectId};
 use wayland_backend::protocol::Interface;
-use wayland_client::globals::{registry_queue_init, GlobalListContents};
+use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{wl_registry, wl_seat::WlSeat};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::wp::tablet::zv2::client::{
@@ -25,11 +25,15 @@ use wayland_protocols::wp::tablet::zv2::client::{
     zwp_tablet_v2::{self, ZwpTabletV2},
 };
 
+/// The pen's state at one tablet frame.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PenSample {
+    /// Surface-local position, in logical points.
     pub x: f32,
     pub y: f32,
+    /// 0 to 1.
     pub pressure: f32,
+    /// Degrees.
     pub tilt_x: f32,
     pub tilt_y: f32,
     pub down: bool,
@@ -37,12 +41,14 @@ pub struct PenSample {
     pub time_ms: u32,
 }
 
+/// Where pen samples come from; one implementation per platform (§0b).
 pub trait PenSource {
+    /// Appends every sample that arrived since the last call. Never blocks.
     fn drain(&mut self, out: &mut Vec<PenSample>);
 }
 
 pub struct WaylandPenSource {
-    rx: mpsc::Receiver<PenSample>,
+    samples_rx: mpsc::Receiver<PenSample>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -52,15 +58,15 @@ impl WaylandPenSource {
     /// thread reads from winit's connection and would outlive it otherwise.
     pub fn shutdown(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
 }
 
 impl PenSource for WaylandPenSource {
     fn drain(&mut self, out: &mut Vec<PenSample>) {
-        out.extend(self.rx.try_iter());
+        out.extend(self.samples_rx.try_iter());
     }
 }
 
@@ -86,14 +92,14 @@ impl WaylandPenSource {
 
         // Bounded so a UI that stops draining (minimised window) can't
         // queue hover samples without limit and replay them as a burst.
-        let (tx, rx) = mpsc::sync_channel(1024);
+        let (samples_tx, samples_rx) = mpsc::sync_channel(1024);
         let (ready_tx, ready_rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
         let thread = std::thread::Builder::new()
-            .name("lilyfield-pen".into())
+            .name("violet-pen".into())
             .spawn(move || {
-                pen_thread(display_addr, surface_addr, tx, ctx, ready_tx, thread_stop)
+                pen_thread(display_addr, surface_addr, samples_tx, ctx, ready_tx, thread_stop)
             })
             .ok()?;
         // Setup is synchronous: no tablet manager means no pen source.
@@ -101,14 +107,16 @@ impl WaylandPenSource {
             let _ = thread.join();
             return None;
         }
-        Some(Self { rx, stop, thread: Some(thread) })
+        Some(Self { samples_rx, stop, thread: Some(thread) })
     }
 }
 
+/// Binds the tablet protocol, reports on `ready` whether that worked, then
+/// pumps Wayland events until `stop` is set.
 fn pen_thread(
     display_addr: usize,
     surface_addr: usize,
-    tx: mpsc::SyncSender<PenSample>,
+    samples_tx: mpsc::SyncSender<PenSample>,
     ctx: egui::Context,
     ready: mpsc::Sender<bool>,
     stop: Arc<AtomicBool>,
@@ -136,12 +144,7 @@ fn pen_thread(
         return;
     };
 
-    let mut state = State {
-        target_surface,
-        tx,
-        ctx,
-        tools: HashMap::new(),
-    };
+    let mut state = State { target_surface, samples_tx, ctx, tools: HashMap::new() };
 
     // Poll with a timeout instead of `blocking_dispatch` so `shutdown` can
     // stop the thread.
@@ -167,9 +170,11 @@ fn wl_surface_interface() -> &'static Interface {
     wayland_client::protocol::wl_surface::WlSurface::interface()
 }
 
+/// The pen thread's Wayland dispatch state.
 struct State {
+    /// Only samples over this surface are sent; others belong to other windows.
     target_surface: wayland_client::protocol::wl_surface::WlSurface,
-    tx: mpsc::SyncSender<PenSample>,
+    samples_tx: mpsc::SyncSender<PenSample>,
     ctx: egui::Context,
     /// Per tool, so a pen and its eraser end (or two tablets) never write
     /// into each other's sample.
@@ -269,37 +274,38 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
             tool.destroy();
             return;
         }
-        let t = state.tools.entry(tool.id()).or_default();
+        // Events accumulate into `pending`; a frame event sends it whole.
+        let tool_state = state.tools.entry(tool.id()).or_default();
         match event {
             Event::ProximityIn { surface, .. } => {
-                *t = ToolState::default();
-                t.focused = surface.id() == state.target_surface.id();
+                *tool_state = ToolState::default();
+                tool_state.focused = surface.id() == state.target_surface.id();
             }
             Event::ProximityOut => {
-                t.pending.down = false;
-                t.leaving = true;
+                tool_state.pending.down = false;
+                tool_state.leaving = true;
             }
-            Event::Down { .. } => t.pending.down = true,
-            Event::Up => t.pending.down = false,
+            Event::Down { .. } => tool_state.pending.down = true,
+            Event::Up => tool_state.pending.down = false,
             Event::Motion { x, y } => {
-                t.pending.x = x as f32;
-                t.pending.y = y as f32;
+                tool_state.pending.x = x as f32;
+                tool_state.pending.y = y as f32;
             }
             Event::Pressure { pressure } => {
-                t.pending.pressure = pressure as f32 / 65535.0;
+                tool_state.pending.pressure = pressure as f32 / 65535.0;
             }
             Event::Tilt { tilt_x, tilt_y } => {
-                t.pending.tilt_x = tilt_x as f32;
-                t.pending.tilt_y = tilt_y as f32;
+                tool_state.pending.tilt_x = tilt_x as f32;
+                tool_state.pending.tilt_y = tilt_y as f32;
             }
             Event::Frame { time } => {
-                t.pending.time_ms = time;
-                if t.focused && state.tx.try_send(t.pending).is_ok() {
+                tool_state.pending.time_ms = time;
+                if tool_state.focused && state.samples_tx.try_send(tool_state.pending).is_ok() {
                     state.ctx.request_repaint();
                 }
-                if t.leaving {
-                    t.focused = false;
-                    t.leaving = false;
+                if tool_state.leaving {
+                    tool_state.focused = false;
+                    tool_state.leaving = false;
                 }
             }
             _ => {}

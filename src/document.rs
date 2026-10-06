@@ -11,7 +11,9 @@ use hokusai_core::tile::{TILE_SIZE, TilePixels};
 
 use crate::compositor;
 
+/// Tile column and row; tile `(tx, ty)` starts at pixel `(tx * 64, ty * 64)`.
 pub type TileKey = (i32, i32);
+/// Shared and immutable once committed; see the module comment.
 pub type Tile = Arc<TilePixels>;
 
 pub const DEFAULT_WIDTH: u32 = 3000;
@@ -20,6 +22,7 @@ pub const DEFAULT_HEIGHT: u32 = 2000;
 /// print size, and keeps a full layer's tile index in the low millions.
 pub const MAX_SIDE: u32 = 30_000;
 
+/// One layer. Tiles that hold no paint are absent, not stored transparent.
 #[derive(Clone)]
 pub struct Layer {
     /// Stable for the session; what history records and commands address.
@@ -28,7 +31,7 @@ pub struct Layer {
     pub opacity: f32,
     pub visible: bool,
     /// OpenRaster composite op, kept so files from other apps round-trip.
-    /// Lilyfield composites every layer as source-over for now.
+    /// Violet composites every layer as source-over for now.
     pub composite_op: String,
     pub tiles: HashMap<TileKey, Tile>,
 }
@@ -41,6 +44,7 @@ pub struct Document {
     pub paper: [u8; 3],
     /// Bottom first.
     pub layers: Vec<Layer>,
+    /// Id of the layer strokes land on.
     pub active: u64,
     next_id: u64,
 }
@@ -64,6 +68,7 @@ impl Document {
         }
     }
 
+    /// Adds an empty layer on top and returns its id.
     pub fn push_layer(&mut self, name: &str) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -88,8 +93,8 @@ impl Document {
 
     /// Number of tile columns and rows covering the document.
     pub fn tiles_across(&self) -> (i32, i32) {
-        let t = TILE_SIZE as u32;
-        (self.width.div_ceil(t) as i32, self.height.div_ceil(t) as i32)
+        let tile = TILE_SIZE as u32;
+        (self.width.div_ceil(tile) as i32, self.height.div_ceil(tile) as i32)
     }
 
     /// How many columns and rows of this tile lie inside the document.
@@ -101,6 +106,7 @@ impl Document {
         self.layers.iter().all(|l| l.tiles.is_empty())
     }
 
+    /// The paper color in the compositor's linear fix15.
     pub fn paper_linear(&self) -> [u16; 3] {
         self.paper.map(compositor::srgb8_to_fix15)
     }
@@ -117,9 +123,11 @@ impl Document {
     }
 }
 
+/// How many columns and rows of tile `(tx, ty)` lie inside a `width` by
+/// `height` document. Only the last column and row of tiles are partial.
 pub fn valid_in_tile(width: u32, height: u32, (tx, ty): TileKey) -> (usize, usize) {
-    let t = TILE_SIZE as i64;
-    let w = (width as i64 - tx as i64 * t).clamp(0, t) as usize;
-    let h = (height as i64 - ty as i64 * t).clamp(0, t) as usize;
+    let tile = TILE_SIZE as i64;
+    let w = (width as i64 - tx as i64 * tile).clamp(0, tile) as usize;
+    let h = (height as i64 - ty as i64 * tile).clamp(0, tile) as usize;
     (w, h)
 }

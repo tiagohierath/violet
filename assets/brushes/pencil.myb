@@ -1,6 +1,6 @@
 {
-    "comment": "Lilyfield pencil: thin graphite. Pressure sets the darkness and a little width.",
-    "group": "lilyfield",
+    "comment": "Violet pencil: thin graphite. Pressure sets the darkness and a little width.",
+    "group": "violet",
     "parent_brush_name": "",
     "settings": {
         "anti_aliasing": {"base_value": 1.0, "inputs": {}},

@@ -1,6 +1,6 @@
 {
-    "comment": "Lilyfield soft: airbrush. Pressure sets the flow.",
-    "group": "lilyfield",
+    "comment": "Violet soft: airbrush. Pressure sets the flow.",
+    "group": "violet",
     "parent_brush_name": "",
     "settings": {
         "anti_aliasing": {"base_value": 0.0, "inputs": {}},

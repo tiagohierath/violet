@@ -2,7 +2,7 @@
 //! hokusai-brush. The built-in presets are embedded `.myb` files, so a
 //! brush someone downloads for MyPaint is the same kind of thing.
 //!
-//! Lilyfield layers three controls of its own over a preset: size (the
+//! Violet layers three controls of its own over a preset: size (the
 //! radius at full pressure), opacity (applied once per stroke, see
 //! `stroke`), and smoothing. Each preset remembers its own size, with a
 //! separate size for erasing.
@@ -21,11 +21,15 @@ const BUILTIN: [(&str, &str); 3] = [
 /// Radius limits, in document pixels.
 pub const MIN_SIZE: f32 = 0.5;
 pub const MAX_SIZE: f32 = 800.0;
+/// Lowest brush opacity; the opacity keys and slider run on a log scale from here to 1.
+pub const MIN_OPACITY: f32 = 0.01;
 
 /// Smoothing steps the smoothing key cycles through; libmypaint's
 /// slow_tracking. Off by default (decided 2026-10-05).
 pub const SMOOTHING: [f32; 4] = [0.0, 1.0, 2.5, 5.0];
 
+/// One brush as the user knows it: a `.myb` brush plus Violet's own
+/// controls, remembered per preset.
 pub struct Preset {
     pub name: String,
     pub brush: Brush,
@@ -34,11 +38,14 @@ pub struct Preset {
     pub opacity: f32,
 }
 
+/// The brush state the app paints with.
 pub struct Brushes {
     pub presets: Vec<Preset>,
+    /// Index into `presets`.
     pub current: usize,
     /// sRGB, 0..1: what the color picker shows and swatches store.
     pub color: [f32; 3],
+    /// Index into `SMOOTHING`.
     pub smoothing: usize,
 }
 
@@ -86,7 +93,7 @@ impl Brushes {
 
     pub fn set_opacity(&mut self, opacity: f32) {
         if let Some(p) = self.presets.get_mut(self.current) {
-            p.opacity = opacity.clamp(0.01, 1.0);
+            p.opacity = opacity.clamp(MIN_OPACITY, 1.0);
         }
     }
 
@@ -106,19 +113,21 @@ impl Brushes {
         }
     }
 
-    /// The hokusai brush for one stroke: the preset with Lilyfield's size,
+    /// The hokusai brush for one stroke: the preset with Violet's size,
     /// color and smoothing applied. hokusai paints in linear light, so the
     /// sRGB color is linearized before it becomes the brush's HSV.
     pub fn stroke_brush(&self, erase: bool) -> Brush {
-        let mut b = self.preset().map_or_else(Brush::new, |p| p.brush.clone());
-        b.get_mut(BrushSetting::Radius).base_value = self.size(erase).ln();
-        let [r, g, bl] = self.color.map(|c| srgb_to_linear(c as f64) as f32);
-        let hsv = rgb_to_hsv(r, g, bl);
-        b.get_mut(BrushSetting::ColorH).base_value = hsv.h;
-        b.get_mut(BrushSetting::ColorS).base_value = hsv.s;
-        b.get_mut(BrushSetting::ColorV).base_value = hsv.v;
-        b.get_mut(BrushSetting::SlowTracking).base_value = SMOOTHING[self.smoothing % SMOOTHING.len()];
-        b
+        let mut brush = self.preset().map_or_else(Brush::new, |p| p.brush.clone());
+        // libmypaint stores the radius as its natural log.
+        brush.get_mut(BrushSetting::Radius).base_value = self.size(erase).ln();
+        let [r, g, b] = self.color.map(|c| srgb_to_linear(c as f64) as f32);
+        let hsv = rgb_to_hsv(r, g, b);
+        brush.get_mut(BrushSetting::ColorH).base_value = hsv.h;
+        brush.get_mut(BrushSetting::ColorS).base_value = hsv.s;
+        brush.get_mut(BrushSetting::ColorV).base_value = hsv.v;
+        brush.get_mut(BrushSetting::SlowTracking).base_value =
+            SMOOTHING[self.smoothing % SMOOTHING.len()];
+        brush
     }
 }
 
@@ -133,9 +142,9 @@ mod tests {
 
     #[test]
     fn size_is_the_full_pressure_radius() {
-        let mut b = Brushes::builtin();
-        b.set_size(false, 10.0);
-        let brush = b.stroke_brush(false);
+        let mut brushes = Brushes::builtin();
+        brushes.set_size(false, 10.0);
+        let brush = brushes.stroke_brush(false);
         assert!((brush.get(BrushSetting::Radius).base_value.exp() - 10.0).abs() < 1e-3);
     }
 }

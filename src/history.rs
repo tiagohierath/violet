@@ -10,8 +10,10 @@ use hokusai_core::tile::TilePixels;
 
 use crate::document::{Document, Layer, Tile, TileKey};
 
+/// Undo steps kept; older ones are dropped.
 pub const STEPS: usize = 100;
 
+/// One tile a stroke replaced.
 pub struct Change {
     pub layer: u64,
     pub key: TileKey,
@@ -19,16 +21,28 @@ pub struct Change {
     pub tile: Option<Tile>,
 }
 
+/// What a record undoes. Each variant holds the displaced state, and
+/// `swap` exchanges it with the document's.
 enum Op {
     Tiles(Vec<Change>),
     /// A layer at `index` that exists in exactly one place: the document
     /// (`layer` is `None`) or this record. Swapping moves it across, which
     /// makes one op serve both "add layer" and "delete layer".
-    Presence { index: usize, layer: Option<Layer> },
-    Move { from: usize, to: usize },
-    Opacity { layer: u64, value: f32 },
+    Presence {
+        index: usize,
+        layer: Option<Layer>,
+    },
+    Move {
+        from: usize,
+        to: usize,
+    },
+    Opacity {
+        layer: u64,
+        value: f32,
+    },
 }
 
+/// One undo step.
 pub struct Record {
     op: Op,
 }
@@ -65,15 +79,17 @@ impl Record {
     fn bytes(&self) -> usize {
         let tile = size_of::<TilePixels>();
         match &self.op {
-            Op::Tiles(c) => c.iter().filter(|c| c.tile.is_some()).count() * tile,
-            Op::Presence { layer: Some(l), .. } => l.tiles.len() * tile,
+            Op::Tiles(changes) => changes.iter().filter(|c| c.tile.is_some()).count() * tile,
+            Op::Presence { layer: Some(layer), .. } => layer.tiles.len() * tile,
             _ => 0,
         }
     }
 }
 
+/// The undo and redo stacks.
 #[derive(Default)]
 pub struct History {
+    /// Oldest first; a deque so the oldest step can drop off the front.
     undo: VecDeque<Record>,
     redo: Vec<Record>,
     /// Layer whose opacity is being dragged: further opacity changes to it
@@ -87,6 +103,7 @@ impl History {
         Self::default()
     }
 
+    /// Records a step that just happened. Clears redo, like every editor.
     pub fn push(&mut self, record: Record) {
         if record.is_empty() {
             return;
@@ -110,20 +127,21 @@ impl History {
 
     /// Returns the tiles whose pixels changed, or `None` when there is
     /// nothing to undo.
-    pub fn undo(&mut self, doc: &mut Document) -> Option<Vec<TileKey>> {
+    pub fn undo(&mut self, doc: &mut Document) -> Option<DirtyHint> {
         self.dragging = None;
         let mut record = self.undo.pop_back()?;
-        let keys = swap(&mut record.op, doc);
+        let hint = swap(&mut record.op, doc);
         self.redo.push(record);
-        Some(keys)
+        Some(hint)
     }
 
-    pub fn redo(&mut self, doc: &mut Document) -> Option<Vec<TileKey>> {
+    /// As `undo`, the other way.
+    pub fn redo(&mut self, doc: &mut Document) -> Option<DirtyHint> {
         self.dragging = None;
         let mut record = self.redo.pop()?;
-        let keys = swap(&mut record.op, doc);
+        let hint = swap(&mut record.op, doc);
         self.undo.push_back(record);
-        Some(keys)
+        Some(hint)
     }
 
     pub fn clear(&mut self) {
@@ -131,6 +149,7 @@ impl History {
         self.redo.clear();
     }
 
+    /// `(undo steps, redo steps)`.
     pub fn depth(&self) -> (usize, usize) {
         (self.undo.len(), self.redo.len())
     }
@@ -141,62 +160,72 @@ impl History {
     }
 }
 
-fn swap(op: &mut Op, doc: &mut Document) -> Vec<TileKey> {
-    let keys = match op {
+/// What an undo or redo needs repainted.
+#[derive(Debug, PartialEq)]
+pub enum DirtyHint {
+    Keys(Vec<TileKey>),
+    AllDoc,
+}
+
+/// Exchanges the record's state with the document's, so the same record
+/// turns around to serve the opposite direction.
+fn swap(op: &mut Op, doc: &mut Document) -> DirtyHint {
+    let hint = match op {
         Op::Tiles(changes) => {
             let mut keys = Vec::with_capacity(changes.len());
-            for c in changes.iter_mut() {
+            for change in changes.iter_mut() {
                 // A record for a layer that no longer exists changes nothing.
-                let Some(layer) = doc.layer_mut(c.layer) else { continue };
-                let current = layer.tiles.remove(&c.key);
-                if let Some(t) = c.tile.take() {
-                    layer.tiles.insert(c.key, t);
+                let Some(layer) = doc.layer_mut(change.layer) else { continue };
+                let current = layer.tiles.remove(&change.key);
+                if let Some(tile) = change.tile.take() {
+                    layer.tiles.insert(change.key, tile);
                 }
-                c.tile = current;
-                keys.push(c.key);
+                change.tile = current;
+                keys.push(change.key);
             }
-            keys
+            DirtyHint::Keys(keys)
         }
         Op::Presence { index, layer } => match layer.take() {
-            Some(l) => {
-                let keys = l.tiles.keys().copied().collect();
+            Some(held) => {
+                let keys = held.tiles.keys().copied().collect();
                 let at = (*index).min(doc.layers.len());
-                doc.layers.insert(at, l);
-                keys
+                doc.layers.insert(at, held);
+                DirtyHint::Keys(keys)
             }
             None if *index < doc.layers.len() => {
-                let l = doc.layers.remove(*index);
-                let keys = l.tiles.keys().copied().collect();
-                *layer = Some(l);
-                keys
+                let removed = doc.layers.remove(*index);
+                let keys = removed.tiles.keys().copied().collect();
+                *layer = Some(removed);
+                DirtyHint::Keys(keys)
             }
-            None => Vec::new(),
+            None => DirtyHint::Keys(Vec::new()),
         },
         Op::Move { from, to } => {
             if *to < doc.layers.len() && *from < doc.layers.len() {
-                let l = doc.layers.remove(*to);
-                let keys = l.tiles.keys().copied().collect();
-                doc.layers.insert(*from, l);
+                let moved = doc.layers.remove(*to);
+                let keys = moved.tiles.keys().copied().collect();
+                doc.layers.insert(*from, moved);
                 std::mem::swap(from, to);
-                keys
+                DirtyHint::Keys(keys)
             } else {
-                Vec::new()
+                DirtyHint::Keys(Vec::new())
             }
         }
         Op::Opacity { layer, value } => match doc.layer_mut(*layer) {
-            Some(l) => {
-                std::mem::swap(&mut l.opacity, value);
-                l.tiles.keys().copied().collect()
+            Some(target) => {
+                std::mem::swap(&mut target.opacity, value);
+                DirtyHint::AllDoc
             }
-            None => Vec::new(),
+            None => DirtyHint::Keys(Vec::new()),
         },
     };
+    // Undoing an "add layer" can remove the active one.
     if doc.layer(doc.active).is_none()
         && let Some(top) = doc.layers.last()
     {
         doc.active = top.id;
     }
-    keys
+    hint
 }
 
 #[cfg(test)]
@@ -211,14 +240,14 @@ mod tests {
         let painted = new_shared_tile();
         doc.layer_mut(id).unwrap().tiles.insert((0, 0), painted.clone());
 
-        let mut h = History::new();
-        h.push(Record::tiles(vec![Change { layer: id, key: (0, 0), tile: None }]));
+        let mut history = History::new();
+        history.push(Record::tiles(vec![Change { layer: id, key: (0, 0), tile: None }]));
 
-        assert_eq!(h.undo(&mut doc), Some(vec![(0, 0)]));
+        assert!(matches!(history.undo(&mut doc), Some(DirtyHint::Keys(k)) if k == vec![(0, 0)]));
         assert!(doc.layer(id).unwrap().tiles.is_empty());
-        assert_eq!(h.redo(&mut doc), Some(vec![(0, 0)]));
+        assert!(matches!(history.redo(&mut doc), Some(DirtyHint::Keys(k)) if k == vec![(0, 0)]));
         assert!(std::sync::Arc::ptr_eq(&doc.layer(id).unwrap().tiles[&(0, 0)], &painted));
-        assert_eq!(h.redo(&mut doc), None);
+        assert_eq!(history.redo(&mut doc), None);
     }
 
     #[test]
@@ -226,12 +255,12 @@ mod tests {
         let mut doc = Document::new(64, 64);
         let second = doc.push_layer("two");
         let removed = doc.layers.remove(1);
-        let mut h = History::new();
-        h.push(Record::removed(1, removed));
+        let mut history = History::new();
+        history.push(Record::removed(1, removed));
         assert_eq!(doc.layers.len(), 1);
-        h.undo(&mut doc);
+        history.undo(&mut doc);
         assert_eq!(doc.layers[1].id, second);
-        h.redo(&mut doc);
+        history.redo(&mut doc);
         assert_eq!(doc.layers.len(), 1);
     }
 
@@ -239,11 +268,11 @@ mod tests {
     fn keeps_a_hundred_steps() {
         let mut doc = Document::new(64, 64);
         let id = doc.active;
-        let mut h = History::new();
+        let mut history = History::new();
         for _ in 0..150 {
-            h.push(Record::tiles(vec![Change { layer: id, key: (0, 0), tile: None }]));
+            history.push(Record::tiles(vec![Change { layer: id, key: (0, 0), tile: None }]));
         }
-        assert_eq!(h.depth(), (STEPS, 0));
-        assert!(h.undo(&mut doc).is_some());
+        assert_eq!(history.depth(), (STEPS, 0));
+        assert!(history.undo(&mut doc).is_some());
     }
 }

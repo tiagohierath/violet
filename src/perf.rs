@@ -1,6 +1,6 @@
 //! Measurement that ships with the app, not a profiler session: every phase
 //! of a frame is timed, allocations are counted, and the numbers are always
-//! on screen one command away. Lilyfield must run on any laptop, so a
+//! on screen one command away. Violet must run on any laptop, so a
 //! regression has to be visible the day it lands.
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -63,7 +63,7 @@ pub enum Span {
     Paint,
     /// Status line, popups and every other element.
     Ui,
-    /// All of Lilyfield's own work in one frame.
+    /// All of Violet's own work in one frame.
     Frame,
     Save,
     Load,
@@ -137,9 +137,13 @@ pub struct Counters {
     pub draw_calls: u64,
 }
 
+/// Everything the perf overlay and the bench show.
 pub struct Perf {
+    /// Indexed by `Span as usize`.
     stats: [Stat; Span::ALL.len()],
+    /// Counters for the frame in progress.
     pub frame: Counters,
+    /// Counters of the last finished frame, which is what gets displayed.
     pub last: Counters,
     /// Wall time between consecutive frames, which is what the eye sees.
     pub interval: Stat,
@@ -147,6 +151,7 @@ pub struct Perf {
     /// submission included), when the backend reports it.
     pub eframe_cpu: Option<f32>,
     frame_start: Option<Instant>,
+    /// `alloc_totals()` at the start of the current frame.
     alloc_mark: (u64, u64),
 }
 
@@ -187,10 +192,10 @@ impl Perf {
         let now = Instant::now();
         if let Some(prev) = self.frame_start {
             self.interval.record((now - prev).as_secs_f32() * 1000.0);
-            let (a, b) = alloc_totals();
-            self.frame.allocs = a - self.alloc_mark.0;
-            self.frame.alloc_bytes = b - self.alloc_mark.1;
-            self.alloc_mark = (a, b);
+            let (allocs, bytes) = alloc_totals();
+            self.frame.allocs = allocs - self.alloc_mark.0;
+            self.frame.alloc_bytes = bytes - self.alloc_mark.1;
+            self.alloc_mark = (allocs, bytes);
             self.last = self.frame;
             self.frame = Counters::default();
         }

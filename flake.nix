@@ -1,5 +1,5 @@
 {
-  description = "Lilyfield: a drawing app";
+  description = "Violet: a drawing app (formerly Lilyfield)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -23,27 +23,30 @@
       };
 
       packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
-        pname = "lilyfield";
+        pname = "violet";
         version = "0.1.0";
         src = ./.;
         cargoLock.lockFile = ./Cargo.lock;
+        # Use the quick-to-rebuild release profile for this local install.
+        buildType = "fast";
         nativeBuildInputs = [ pkgs.pkg-config ];
         buildInputs = runtimeLibs;
-        doCheck = false;
+        doCheck = true;
         postInstall = ''
           mkdir -p $out/share/applications
-          cat > $out/share/applications/lilyfield.desktop <<EOF
+          cat > $out/share/applications/violet.desktop <<EOF
           [Desktop Entry]
           Type=Application
-          Name=Lilyfield
-          Exec=lilyfield %F
+          Name=Violet
+          Exec=$out/bin/violet %f
+          StartupWMClass=violet
           Terminal=false
           Categories=Graphics;2DGraphics;RasterGraphics;
           EOF
         '';
         # winit and wgpu dlopen these libs; fixup's shrink-rpath drops them, so add them back.
         postFixup = ''
-          patchelf --add-rpath ${pkgs.lib.makeLibraryPath runtimeLibs} $out/bin/*
+          patchelf --add-rpath ${pkgs.lib.makeLibraryPath runtimeLibs} $out/bin/violet
         '';
       };
     };
