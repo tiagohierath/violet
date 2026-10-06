@@ -509,6 +509,9 @@ Next steps, in order:
 - [ ] Rayon over tiles, once a brush is big enough to need it
 - [ ] SIMD, against a profile, never before one
 
+## Decided 2026-10-06 (Tiago): one config file
+- [ ] **Violet has ONE config file, period.** Like NixOS, and like a Neovim config: the whole app (keys, layout, theme, brush defaults, fonts) is set by a single file, so it is totally reproducible. Noted only, not started. Today's `~/.config/violet/keys.toml` is the first piece; the rest must move into that same file, and nothing may be configured anywhere else.
+
 ## Today (2026-10-06)
 - [x] **Geist Sans for the whole UI** (Tiago, 2026-10-06). Embedded Geist-Regular and Geist-Bold (nixpkgs geist-font 1.5.0, OFL-1.1) replace Liberation Sans in `src/theme.rs`. Liberation files kept on disk, no longer used.
 - [x] **Increase/decrease steps are logarithmic, not linear** (Tiago, 2026-10-06). Brush size and opacity keys step multiplicatively (x1.25 / x0.8). Brush opacity and layer opacity sliders map on a log scale from 0.01 to 1 (`opacity_position` in `src/chrome.rs`). Size was already log. Full test suite passes.
