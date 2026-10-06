@@ -514,6 +514,9 @@ Next steps, in order:
   - **Working on it** (Tiago, 2026-10-06: "ok work on that"). All five steps above, in order 5, 1, 2, 3, 4.
 - [ ] **Violet has ONE config file, period.** Like NixOS, and like a Neovim config: the whole app (keys, layout, theme, brush defaults, fonts) is set by a single file, so it is totally reproducible. Noted only, not started. Today's `~/.config/violet/keys.toml` is the first piece; the rest must move into that same file, and nothing may be configured anywhere else.
 
+## URGENT: effects module (Tiago, 2026-10-06)
+- [ ] **Effects module**: basic image effects applied to the active layer or selection, starting with Gaussian blur, then the other basics (sharpen, invert, brightness/contrast). Each effect is a named command, configurable through the config file, and undoable like any edit.
+
 ## Drawing tools backlog (Tiago, 2026-10-06)
 Build one at a time. Each one modular and configurable through the config file, not hardcoded.
 - [ ] Alpha lock: paint only where pixels already exist.

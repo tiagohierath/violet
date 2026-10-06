@@ -131,8 +131,8 @@ impl Theme {
             (TextStyle::Heading, bold(14.0)),
             (TextStyle::Body, regular(14.0)),
             (TextStyle::Button, regular(14.0)),
-            (TextStyle::Small, regular(12.0)),
-            (TextStyle::Monospace, FontId::monospace(12.0)),
+            (TextStyle::Small, regular(14.0)),
+            (TextStyle::Monospace, FontId::monospace(14.0)),
         ]
         .into();
     }

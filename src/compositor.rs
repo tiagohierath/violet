@@ -166,12 +166,17 @@ pub fn flatten_px(layers: impl IntoIterator<Item = (Px, u32)>) -> Px {
 /// and for flattened exports. `put` receives `(index, rgb)`.
 #[inline]
 pub fn to_display(src: &[Px], paper: [u16; 3], mut put: impl FnMut(usize, [u8; 3])) {
-    let lut = lut_srgb8();
     for (i, p) in src.iter().enumerate() {
-        let keep = ONE - p[3] as u32;
-        let channel = |c: usize| lut[(p[c] as u32 + mul(paper[c] as u32, keep)).min(ONE) as usize];
-        put(i, [channel(0), channel(1), channel(2)]);
+        put(i, display_px(*p, paper));
     }
+}
+
+#[inline]
+pub fn display_px(p: Px, paper: [u16; 3]) -> [u8; 3] {
+    let lut = lut_srgb8();
+    let keep = ONE - p[3] as u32;
+    let channel = |c: usize| lut[(p[c] as u32 + mul(paper[c] as u32, keep)).min(ONE) as usize];
+    [channel(0), channel(1), channel(2)]
 }
 
 /// The paper's own display color.

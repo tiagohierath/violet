@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use hokusai_core::BrushSetting;
 use violet::compositor::{self, ONE, StrokeBlend};
 use violet::document::{DEFAULT_HEIGHT, DEFAULT_WIDTH, MAX_SIDE};
 use violet::history::{DirtyHint, Record};
@@ -270,6 +271,8 @@ fn stroke_begin(st: &mut State, args: &Value) -> Result<Value, String> {
     if st.loading {
         return Err("still loading".into());
     }
+    let color = st.brushes.color;
+    st.note_recent(color);
     let erase = st.erasing || args.text(0) == Some("erase");
     let layer = st.doc.layer(st.doc.active).ok_or("no layer to paint on")?;
     if !layer.visible {
@@ -277,7 +280,11 @@ fn stroke_begin(st: &mut State, args: &Value) -> Result<Value, String> {
     }
     let blend = if erase { StrokeBlend::Erase } else { StrokeBlend::Normal };
     let brush = st.brushes.stroke_brush(erase);
-    let base = layer.tiles.clone();
+    let base = if brush.get(BrushSetting::Smudge).base_value > 0.0 {
+        layer.tiles.clone()
+    } else {
+        Default::default()
+    };
     st.stroke = Some(LiveStroke::new(
         brush,
         layer.id,

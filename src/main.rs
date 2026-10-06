@@ -8,6 +8,7 @@ mod keymap;
 mod layout;
 mod pen;
 mod settings;
+mod splash;
 mod theme;
 mod view;
 

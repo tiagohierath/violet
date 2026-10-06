@@ -43,14 +43,19 @@ impl Default for Layout {
         let place = |panel, dock, size, visible| Placement { panel, dock, size, visible };
         Self {
             placements: vec![
+                place("bar", Dock::Top, [28.0, 0.0], true),
                 place("color", Dock::Right, [300.0, 340.0], true),
-                place("info", Dock::Right, [300.0, 0.0], true),
+                place("info", Dock::Right, [300.0, 400.0], true),
                 place("terminal", Dock::Right, [300.0, 200.0], true),
+                place("wheel", Dock::Float { x: -340.0, y: 60.0 }, [300.0, 340.0], false),
                 place("perf", Dock::Float { x: 12.0, y: 12.0 }, [360.0, 420.0], true),
             ],
         }
     }
 }
+
+/// The narrowest the canvas may be made by docked panels.
+const MIN_CANVAS: f32 = 240.0;
 
 /// A layout applied to one screen size: the rect each element renders into.
 pub struct Resolved {
@@ -77,6 +82,10 @@ impl Layout {
             let edge: Vec<&&Placement> =
                 visible.iter().filter(|other| other.dock == placement.dock).collect();
             let thickness = edge.iter().map(|member| member.size[0]).fold(0.0, f32::max);
+            let thickness = match placement.dock {
+                Dock::Left | Dock::Right => thickness.min((rest.width() - MIN_CANVAS).max(0.0)),
+                _ => thickness,
+            };
             let Some(band) = carve(&mut rest, placement.dock, thickness) else { continue };
             // Left and right edges stack their panels top to bottom.
             let vertical = matches!(placement.dock, Dock::Left | Dock::Right);
@@ -99,8 +108,10 @@ impl Layout {
         for placement in &visible {
             if let Dock::Float { x, y } = placement.dock {
                 let [w, h] = placement.size;
-                let x = if x < 0.0 { rest.max.x + x - w } else { rest.min.x + x };
-                let y = if y < 0.0 { rest.max.y + y - h } else { rest.min.y + y };
+                let x = if x < 0.0 { screen.max.x + x - w } else { screen.min.x + x };
+                let y = if y < 0.0 { screen.max.y + y - h } else { screen.min.y + y };
+                let x = x.clamp(screen.min.x, (screen.max.x - w).max(screen.min.x));
+                let y = y.clamp(screen.min.y, (screen.max.y - h).max(screen.min.y));
                 panels.push((placement.panel, Rect::from_min_size(Pos2::new(x, y), vec2(w, h))));
             }
         }
@@ -147,7 +158,7 @@ mod tests {
         let resolved = Layout::default().resolve(screen, |p| p != "perf");
         assert_eq!(
             resolved.canvas,
-            Rect::from_min_max(Pos2::ZERO, pos2(1280.0 - 300.0, 800.0))
+            Rect::from_min_max(pos2(0.0, 28.0), pos2(1280.0 - 300.0, 800.0))
         );
         let color = resolved.panels.iter().find(|(n, _)| *n == "color").map(|(_, r)| *r);
         assert_eq!(color.map(|c| c.height()), Some(340.0));

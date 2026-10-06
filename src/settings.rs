@@ -77,7 +77,7 @@ fn modal(ctx: &egui::Context, id: &str, theme: &Theme, width: f32, content: impl
 }
 
 fn title(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(18.0).strong());
+    ui.label(RichText::new(text).font(crate::theme::bold(14.0)));
 }
 
 /// The primary button: accent fill, so it stands out without gray.

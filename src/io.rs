@@ -253,12 +253,40 @@ pub fn with_extension(p: PathBuf) -> PathBuf {
     if p.extension().is_some() { p } else { p.with_extension(file::EXTENSION) }
 }
 
-/// The first free `drawing-NNN.lily` in the drawings folder.
+/// Flowers and creatures for untitled drawings' names: `lily-otter.lily`.
+const FLOWERS: [&str; 25] = [
+    "lily", "rose", "iris", "daisy", "poppy", "tulip", "violet", "aster", "clover", "lotus", "orchid", "peony", "dahlia",
+    "lilac", "marigold", "pansy", "jasmine", "magnolia", "bluebell", "foxglove", "hyacinth", "thistle", "sunflower",
+    "camellia", "begonia",
+];
+const CREATURES: [&str; 25] = [
+    "otter", "fox", "hare", "owl", "wren", "moth", "finch", "badger", "heron", "newt", "lynx", "seal", "robin", "swan",
+    "deer", "koi", "bee", "tern", "fawn", "dove", "gecko", "frog", "lark", "mole", "bat",
+];
+
+/// A name for a new drawing that is not in use yet: one flower and one
+/// creature, with a number added if the pair is taken.
 pub fn untitled(paths: &Paths) -> PathBuf {
+    let mut x = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(1, |d| d.as_nanos() as u64)
+        | 1;
+    let mut next = move || {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        x
+    };
+    let flower = FLOWERS[(next() % FLOWERS.len() as u64) as usize];
+    let creature = CREATURES[(next() % CREATURES.len() as u64) as usize];
+    let base = format!("{flower}-{creature}");
     (1..)
-        .map(|n| paths.drawings.join(format!("drawing-{n:03}.{}", file::EXTENSION)))
+        .map(|n| {
+            let stem = if n == 1 { base.clone() } else { format!("{base}-{n}") };
+            paths.drawings.join(format!("{stem}.{}", file::EXTENSION))
+        })
         .find(|p| !p.exists())
-        .unwrap_or_else(|| paths.drawings.join(format!("drawing.{}", file::EXTENSION)))
+        .unwrap_or_else(|| paths.drawings.join(format!("{base}.{}", file::EXTENSION)))
 }
 
 /// The recent files list, newest first, minus files that are gone.

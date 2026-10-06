@@ -293,12 +293,14 @@ fn upload_tile(
     // the floor; it is moved into the image, never copied.
     let mut colors = vec![paper; w * h];
     if painted {
-        compositor::to_display(&levels.px[level], doc.paper_linear(), |i, rgb| {
-            let (x, y) = (i % side, i / side);
-            if x < w && y < h {
-                colors[y * w + x] = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+        let src = &levels.px[level];
+        let paper = doc.paper_linear();
+        for y in 0..h {
+            for x in 0..w {
+                let [r, g, b] = compositor::display_px(src[y * side + x], paper);
+                colors[y * w + x] = Color32::from_rgb(r, g, b);
             }
-        });
+        }
     }
     perf.frame.uploads += 1;
     perf.frame.upload_bytes += (w * h * 4) as u64;

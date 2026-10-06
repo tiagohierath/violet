@@ -44,12 +44,14 @@ pub struct Scratch {
     /// tile. Smudge reads this, so it never picks up the empty scratch.
     view: HashMap<TileKey, Box<TilePixels>>,
     opacity: u32,
+    /// Only smudge brushes read the view, so only they pay for it.
+    smudges: bool,
     /// Dabs drawn so far in this stroke.
     pub dabs: u64,
 }
 
 impl Scratch {
-    pub fn new(bounds: (i32, i32), base: HashMap<TileKey, Tile>, opacity: u32) -> Self {
+    pub fn new(bounds: (i32, i32), base: HashMap<TileKey, Tile>, opacity: u32, smudges: bool) -> Self {
         Self {
             tiles: HashMap::new(),
             dirty: Vec::new(),
@@ -58,19 +60,22 @@ impl Scratch {
             base,
             view: HashMap::new(),
             opacity,
+            smudges,
             dabs: 0,
         }
     }
 
     fn refresh_view(&mut self, key: TileKey) {
+        if !self.smudges {
+            return;
+        }
         let Some((tile, _)) = self.tiles.get(&key) else { return };
         let below = self.base.get(&key);
-        let mut out = compositor::new_tile();
+        let out = self.view.entry(key).or_insert_with(compositor::new_tile);
         for (i, px) in out.as_flattened_mut().iter_mut().enumerate() {
             let under = below.map_or([0; 4], |t| compositor::pixels(t)[i]);
             *px = compositor::apply_stroke(under, compositor::pixels(tile)[i], self.opacity, compositor::StrokeBlend::Normal);
         }
-        self.view.insert(key, out);
     }
 
     pub fn get(&self, key: TileKey) -> Option<&TilePixels> {
@@ -147,11 +152,12 @@ impl LiveStroke {
         bounds: (i32, i32),
         base: HashMap<TileKey, Tile>,
     ) -> Self {
+        let smudges = brush.get(BrushSetting::Smudge).base_value > 0.0;
         Self {
             layer,
             blend,
             opacity: (opacity.clamp(0.0, 1.0) * compositor::ONE as f32) as u32,
-            scratch: Scratch::new(bounds, base, (opacity.clamp(0.0, 1.0) * compositor::ONE as f32) as u32),
+            scratch: Scratch::new(bounds, base, (opacity.clamp(0.0, 1.0) * compositor::ONE as f32) as u32, smudges),
             brush,
             state: BrushState::default(),
             last: None,

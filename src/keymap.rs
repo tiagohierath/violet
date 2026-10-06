@@ -40,7 +40,7 @@ impl Keymap {
     /// The keys file at `~/.config/violet/keys.toml`, created from the
     /// template when it does not exist yet.
     pub fn load() -> Self {
-        let path = user_file();
+        let path = config_file("keys.toml");
         if !path.exists() {
             let created = path.parent().map_or(Ok(()), fs::create_dir_all).and_then(|()| fs::write(&path, TEMPLATE));
             if let Err(err) = created {
@@ -112,14 +112,14 @@ impl Keymap {
     }
 }
 
-/// `~/.config/violet/keys.toml`, following `$XDG_CONFIG_HOME` when set.
-fn user_file() -> PathBuf {
+/// `~/.config/violet/<name>`, following `$XDG_CONFIG_HOME` when set.
+pub fn config_file(name: &str) -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
         .unwrap_or_else(|| PathBuf::from(".config"));
-    base.join("violet").join("keys.toml")
+    base.join("violet").join(name)
 }
 
 /// `"ctrl+shift+z"` to a `Chord`; `None` for an unknown key or modifier.

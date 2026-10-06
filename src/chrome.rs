@@ -14,25 +14,10 @@ use eframe::egui::{
 use violet::brushes::{MAX_SIZE, MIN_OPACITY, MIN_SIZE, SMOOTHING};
 use violet::perf::Span;
 
-use crate::app::State;
+use crate::app::{State, SwatchOrder};
 use crate::commands::{Handle, Invocation, Kind, Registry, Value};
 use crate::keymap::Keymap;
 use crate::theme::{Theme, bold, regular};
-
-const PALETTE: [[f32; 3]; 12] = [
-    [0.04, 0.04, 0.04],
-    [1.0, 1.0, 1.0],
-    [0.78, 0.12, 0.12],
-    [0.95, 0.48, 0.12],
-    [0.97, 0.84, 0.22],
-    [0.22, 0.62, 0.28],
-    [0.14, 0.56, 0.52],
-    [0.16, 0.42, 0.82],
-    [0.12, 0.20, 0.52],
-    [0.50, 0.26, 0.66],
-    [0.92, 0.50, 0.66],
-    [0.46, 0.30, 0.18],
-];
 
 /// Names for the smoothing steps, in `SMOOTHING` order.
 const SMOOTHING_NAMES: [&str; 4] = ["Off", "Low", "Medium", "High"];
@@ -61,6 +46,7 @@ impl Chrome<'_> {
     pub fn panel(&self, ui: &mut Ui, name: &str, out: &mut Vec<Invocation>) {
         match name {
             "color" => self.color(ui, out),
+            "wheel" => self.wheel(ui, out),
             "info" => self.info(ui, out),
             "terminal" => self.terminal(ui, out),
             "perf" => self.perf(ui),
@@ -84,9 +70,102 @@ impl Chrome<'_> {
         }
     }
 
-    // ---- color (hue ring + SV square) ---------------------------------
+    // ---- color (text, drag to change; the main color panel) -----------
 
     fn color(&self, ui: &mut Ui, out: &mut Vec<Invocation>) {
+        let st = self.st;
+        let t = self.theme;
+        let rect = ui.max_rect();
+        let p = ui.painter().clone();
+        let mut y = rect.top();
+        let title = row_at(rect, y);
+        y += LINE;
+        let hex = format!("#{:02X}{:02X}{:02X}", to8(st.brushes.color[0]), to8(st.brushes.color[1]), to8(st.brushes.color[2]));
+        let code = p.text(title.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, hex, mono(), t.text);
+        let chip = Rect::from_center_size(pos2(code.left() - 14.0, title.center().y), Vec2::splat(14.0));
+        p.rect_filled(chip, CornerRadius::ZERO, rgb8(st.brushes.color));
+        p.rect_stroke(chip, CornerRadius::ZERO, Stroke::new(1.0, t.border), StrokeKind::Inside);
+        let hsv = rgb_to_hsv(st.brushes.color);
+        let mut next = hsv;
+        let hue = drag_text(ui, &p, row_at(rect, y), t, Id::new("color-hue"), &format!("hue    {:.0}", hsv[0] * 360.0), hsv[0] * 360.0, 0.1);
+        if let Some(h) = hue {
+            next[0] = (h / 360.0).rem_euclid(1.0);
+        }
+        y += LINE;
+        let sat = drag_text(ui, &p, row_at(rect, y), t, Id::new("color-sat"), &format!("sat    {:.0}%", hsv[1] * 100.0), hsv[1] * 100.0, 0.05);
+        if let Some(s) = sat {
+            next[1] = (s / 100.0).clamp(0.0, 1.0);
+        }
+        y += LINE;
+        let val = drag_text(ui, &p, row_at(rect, y), t, Id::new("color-value"), &format!("value  {:.0}%", hsv[2] * 100.0), hsv[2] * 100.0, 0.05);
+        if let Some(v) = val {
+            next[2] = (v / 100.0).clamp(0.0, 1.0);
+        }
+        y += LINE;
+        let rand = row_at(rect, y);
+        y += LINE;
+        let rand_response = ui.allocate_rect(rand, Sense::click());
+        let rand_ink = if rand_response.hovered() { t.accent } else { t.text };
+        outlined_label(&p, rand.left_center(), "rand", rand_ink);
+        if rand_response.clicked() {
+            next = rgb_to_hsv(random_rgb());
+        }
+        let new_rgb = hsv_to_rgb(next);
+        if new_rgb != st.brushes.color {
+            out.push(color_set(new_rgb));
+        }
+
+        self.swatches(ui, out, rect.left(), y + GAP, rect.width());
+    }
+
+    /// The palette in the configured order, with recent colors first when
+    /// that order is chosen. Shows at most `SWATCHES`.
+    fn ordered_swatches(&self) -> Vec<[f32; 3]> {
+        let same = |a: &[f32; 3], b: &[f32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() <= 0.004);
+        let mut list: Vec<[f32; 3]> = match self.st.swatch_order {
+            SwatchOrder::Recent => {
+                let mut list = self.st.recent_colors.clone();
+                for c in &self.st.palette {
+                    if !list.iter().any(|r| same(r, c)) {
+                        list.push(*c);
+                    }
+                }
+                list
+            }
+            SwatchOrder::Hue => {
+                let mut list = self.st.palette.clone();
+                list.sort_by(|a, b| rgb_to_hsv(*a)[0].total_cmp(&rgb_to_hsv(*b)[0]));
+                list
+            }
+        };
+        list.truncate(crate::app::SWATCHES);
+        list
+    }
+
+    fn swatches(&self, ui: &mut Ui, out: &mut Vec<Invocation>, left: f32, top: f32, width: f32) {
+        let t = self.theme;
+        let painter = ui.painter().clone();
+        let w = (width - 4.0 * 4.0) / 5.0 / 2.0;
+        let per_row = ((width + 4.0) / (w + 4.0)).floor().max(1.0) as usize;
+        for (i, c) in self.ordered_swatches().iter().enumerate() {
+            let (row, col) = (i / per_row, i % per_row);
+            let r = Rect::from_min_size(
+                pos2(left + col as f32 * (w + 4.0), top + row as f32 * (w + 4.0)),
+                vec2(w, w),
+            );
+            let response = ui.allocate_rect(r, Sense::click());
+            painter.rect_filled(r, CornerRadius::ZERO, rgb8(*c));
+            let edge = if response.hovered() { t.accent } else { t.border };
+            painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, edge), StrokeKind::Inside);
+            if response.clicked() {
+                out.push(color_set(*c));
+            }
+        }
+    }
+
+    // ---- wheel (hue ring + SV square), an optional second color panel -------
+
+    fn wheel(&self, ui: &mut Ui, out: &mut Vec<Invocation>) {
         let t = self.theme;
         let rect = ui.max_rect();
         let rgb = self.st.brushes.color;
@@ -94,7 +173,6 @@ impl Chrome<'_> {
 
         // Title, with the current color and its hex code at the right.
         let title = Rect::from_min_size(rect.min, vec2(rect.width(), LINE));
-        painter.text(title.left_center(), Align2::LEFT_CENTER, "Color", bold(MONO), t.text);
         let hex = format!("#{:02X}{:02X}{:02X}", to8(rgb[0]), to8(rgb[1]), to8(rgb[2]));
         let code = painter.text(title.right_center(), Align2::RIGHT_CENTER, hex, mono(), t.text);
         let chip = Rect::from_center_size(pos2(code.left() - 8.0 - 10.0, title.center().y), Vec2::splat(20.0));
@@ -102,8 +180,7 @@ impl Chrome<'_> {
         painter.rect_stroke(chip, CornerRadius::ZERO, Stroke::new(1.0, t.border), StrokeKind::Inside);
 
         // The swatches sit at the bottom; the ring and its square fill the rest.
-        let swatch_h = 28.0;
-        let swatches_h = 2.0 * swatch_h + 4.0;
+        let swatches_h = 0.0;
         let top = title.bottom() + GAP;
         let bottom = rect.bottom() - swatches_h - GAP;
         let outer = ((bottom - top).min(rect.width()) / 2.0).max(40.0);
@@ -165,24 +242,6 @@ impl Chrome<'_> {
             out.push(color_set(new_rgb));
         }
 
-        // Swatches: two rows of six, filling the width.
-        let per_row = 6;
-        let w = (rect.width() - 4.0 * (per_row - 1) as f32) / per_row as f32;
-        let top = rect.bottom() - swatches_h;
-        for (i, c) in PALETTE.iter().enumerate() {
-            let (row, col) = (i / per_row, i % per_row);
-            let r = Rect::from_min_size(
-                pos2(rect.left() + col as f32 * (w + 4.0), top + row as f32 * (swatch_h + 4.0)),
-                vec2(w, swatch_h),
-            );
-            let response = ui.allocate_rect(r, Sense::click());
-            painter.rect_filled(r, CornerRadius::ZERO, rgb8(*c));
-            let edge = if response.hovered() { t.accent } else { t.border };
-            painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, edge), StrokeKind::Inside);
-            if response.clicked() {
-                out.push(color_set(*c));
-            }
-        }
     }
 
     // ---- measurements ------------------------------------------------
@@ -265,7 +324,7 @@ impl Chrome<'_> {
             let r = Rect::from_min_size(pos2(rect.left() + i as f32 * 64.0, y), vec2(64.0, LINE));
             let response = ui.allocate_rect(r, Sense::click()).on_hover_text(self.hint(label, command));
             let ink = if response.hovered() { t.accent } else { t.text };
-            p.text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, label, mono(), ink);
+            outlined_label(&p, r.left_center(), label, ink);
             if response.clicked() {
                 out.push(Invocation::new(command, Value::Nil));
             }
@@ -432,6 +491,56 @@ fn field(ui: &mut Ui, t: &Theme, rect: Rect, label: &str, value: &str, at: f32, 
     (v, response)
 }
 
+/// A button: its label in a plain outline, the line as thick as the letters.
+/// `at` is the left edge at the label's height. Returns the outline.
+pub fn outlined_label(painter: &egui::Painter, at: Pos2, label: &str, ink: Color32) -> Rect {
+    let galley = painter.layout_no_wrap(label.to_owned(), mono(), ink);
+    let size = galley.size();
+    let rect = Rect::from_min_size(pos2(at.x, at.y - LINE / 2.0 + 3.0), vec2(size.x + 16.0, LINE - 6.0));
+    painter.rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.2, ink), StrokeKind::Inside);
+    painter.galley(rect.center() - size / 2.0, galley, ink);
+    rect
+}
+
+fn row_at(rect: Rect, y: f32) -> Rect {
+    Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), LINE))
+}
+
+/// Text that changes value when dragged: the value moves by the pointer's
+/// travel from where the press began, `per_px` units per pixel. Returns the
+/// new value while the drag is live.
+fn drag_text(ui: &mut Ui, p: &egui::Painter, rect: Rect, t: &Theme, id: Id, text: &str, value: f32, per_px: f32) -> Option<f32> {
+    p.text(rect.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, text, mono(), t.text);
+    let response = ui.allocate_rect(rect, Sense::click_and_drag());
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if response.drag_started() {
+        ui.data_mut(|d| d.insert_temp(id, value));
+    }
+    if !response.dragged() {
+        return None;
+    }
+    let start: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(value);
+    let origin = ui.input(|i| i.pointer.press_origin())?;
+    let pos = response.interact_pointer_pos()?;
+    Some(start + (pos.x - origin.x) * per_px)
+}
+
+fn random_rgb() -> [f32; 3] {
+    let mut x = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(1, |d| d.as_nanos() as u64)
+        | 1;
+    let mut next = || {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        (x >> 11) as f32 / (1u64 << 53) as f32
+    };
+    [next(), next(), next()]
+}
+
 fn text_button(ui: &mut Ui, t: &Theme, rect: Rect, label: &str, selected: bool, hint: &str) -> Response {
     let response = ui.allocate_rect(rect, Sense::click()).on_hover_text(hint);
     let (bg, ink) = state_colors(t, &response, selected);
@@ -567,7 +676,7 @@ fn px(size: f32) -> String {
     if size < 10.0 { format!("{size:.1}") } else { format!("{size:.0}") }
 }
 
-fn tool_name(st: &State) -> String {
+pub fn tool_name(st: &State) -> String {
     if st.eyedropper {
         "Eyedropper".into()
     } else if st.erasing {
