@@ -12,7 +12,7 @@ use hokusai_core::{Brush, BrushInput, BrushSetting, BrushState};
 
 use crate::compositor::{self, StrokeBlend};
 use crate::dab;
-use crate::document::{Document, TileKey, valid_in_tile};
+use crate::document::{Document, Tile, TileKey, valid_in_tile};
 use crate::history::{Change, Record};
 
 /// One input sample, in document pixels.
@@ -37,19 +37,40 @@ pub struct Scratch {
     /// The document's size in tiles (`Document::tiles_across`).
     bounds: (i32, i32),
     trash: Box<TilePixels>,
+    /// The layer as it was when the stroke began, for smudge brushes to
+    /// pick up. Tiles are shared, so this copies no pixels.
+    base: HashMap<TileKey, Tile>,
+    /// The layer with this stroke so far composited on top, per touched
+    /// tile. Smudge reads this, so it never picks up the empty scratch.
+    view: HashMap<TileKey, Box<TilePixels>>,
+    opacity: u32,
     /// Dabs drawn so far in this stroke.
     pub dabs: u64,
 }
 
 impl Scratch {
-    pub fn new(bounds: (i32, i32)) -> Self {
+    pub fn new(bounds: (i32, i32), base: HashMap<TileKey, Tile>, opacity: u32) -> Self {
         Self {
             tiles: HashMap::new(),
             dirty: Vec::new(),
             bounds,
             trash: compositor::new_tile(),
+            base,
+            view: HashMap::new(),
+            opacity,
             dabs: 0,
         }
+    }
+
+    fn refresh_view(&mut self, key: TileKey) {
+        let Some((tile, _)) = self.tiles.get(&key) else { return };
+        let below = self.base.get(&key);
+        let mut out = compositor::new_tile();
+        for (i, px) in out.as_flattened_mut().iter_mut().enumerate() {
+            let under = below.map_or([0; 4], |t| compositor::pixels(t)[i]);
+            *px = compositor::apply_stroke(under, compositor::pixels(tile)[i], self.opacity, compositor::StrokeBlend::Normal);
+        }
+        self.view.insert(key, out);
     }
 
     pub fn get(&self, key: TileKey) -> Option<&TilePixels> {
@@ -85,7 +106,9 @@ impl TiledSurface for Scratch {
         &mut entry.0
     }
 
-    fn tile_request_end(&mut self, _tx: i32, _ty: i32) {}
+    fn tile_request_end(&mut self, tx: i32, ty: i32) {
+        self.refresh_view((tx, ty));
+    }
 
     fn draw_dab(&mut self, d: &Dab) -> bool {
         self.dabs += 1;
@@ -97,7 +120,7 @@ impl TiledSurface for Scratch {
     }
 
     fn tile_lookup(&self, tx: i32, ty: i32) -> Option<&TilePixels> {
-        self.get((tx, ty))
+        self.view.get(&(tx, ty)).map(|t| &**t).or_else(|| self.base.get(&(tx, ty)).map(|t| &**t))
     }
 }
 
@@ -122,12 +145,13 @@ impl LiveStroke {
         blend: StrokeBlend,
         opacity: f32,
         bounds: (i32, i32),
+        base: HashMap<TileKey, Tile>,
     ) -> Self {
         Self {
             layer,
             blend,
             opacity: (opacity.clamp(0.0, 1.0) * compositor::ONE as f32) as u32,
-            scratch: Scratch::new(bounds),
+            scratch: Scratch::new(bounds, base, (opacity.clamp(0.0, 1.0) * compositor::ONE as f32) as u32),
             brush,
             state: BrushState::default(),
             last: None,

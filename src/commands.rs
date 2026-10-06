@@ -277,8 +277,15 @@ fn stroke_begin(st: &mut State, args: &Value) -> Result<Value, String> {
     }
     let blend = if erase { StrokeBlend::Erase } else { StrokeBlend::Normal };
     let brush = st.brushes.stroke_brush(erase);
-    st.stroke =
-        Some(LiveStroke::new(brush, layer.id, blend, st.brushes.opacity(), st.doc.tiles_across()));
+    let base = layer.tiles.clone();
+    st.stroke = Some(LiveStroke::new(
+        brush,
+        layer.id,
+        blend,
+        st.brushes.opacity(),
+        st.doc.tiles_across(),
+        base,
+    ));
     Ok(Value::Nil)
 }
 
@@ -422,6 +429,7 @@ fn brush_select(st: &mut State, args: &Value) -> Result<Value, String> {
     if !st.brushes.select(name) {
         return Err(format!("no brush {name}"));
     }
+    st.erasing = false;
     st.hud();
     Ok(Value::Nil)
 }

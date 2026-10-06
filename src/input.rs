@@ -33,6 +33,8 @@ enum Mode {
     Idle,
     Stroke,
     Pan(Pos2),
+    /// Zooms around `origin` as the pen moves: up zooms in.
+    Zoom { origin: Pos2, last: Pos2 },
     Pick,
     /// Pressed on a panel: the panel's own widgets handle it.
     Panel,
@@ -43,7 +45,28 @@ enum Mode {
 pub enum Hold {
     None,
     Pan,
+    Zoom,
     Pick,
+}
+
+/// Zoom factor per screen pixel of pen travel: 100 px is about 1.65x.
+const ZOOM_PER_PIXEL: f32 = 0.005;
+
+/// Upward travel (negative `dy`) zooms in.
+fn zoom_factor(dy: f32) -> f32 {
+    (-dy * ZOOM_PER_PIXEL).exp()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::zoom_factor;
+
+    #[test]
+    fn dragging_up_zooms_in() {
+        assert!(zoom_factor(-50.0) > 1.0);
+        assert!(zoom_factor(50.0) < 1.0);
+        assert_eq!(zoom_factor(0.0), 1.0);
+    }
 }
 
 pub struct Frame<'a> {
@@ -97,6 +120,12 @@ impl Input {
                 ));
                 self.mode = Mode::Pan(s.pos);
             }
+            Mode::Zoom { origin, last } => {
+                let factor = zoom_factor(s.pos.y - last.y);
+                let args = Value::List(vec![Value::Num(f64::from(factor)), Value::Num(origin.x as f64), Value::Num(origin.y as f64)]);
+                f.out.push(Invocation::new("view.zoom-by", args));
+                self.mode = Mode::Zoom { origin, last: s.pos };
+            }
             Mode::Pick => f.out.push(pick(s, f)),
             Mode::Panel | Mode::Idle => {}
         }
@@ -125,6 +154,7 @@ impl Input {
         }
         self.mode = match f.hold {
             Hold::Pan => Mode::Pan(s.pos),
+            Hold::Zoom => Mode::Zoom { origin: s.pos, last: s.pos },
             Hold::Pick => {
                 f.out.push(pick(s, f));
                 Mode::Pick

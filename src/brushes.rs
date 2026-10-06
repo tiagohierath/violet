@@ -12,10 +12,11 @@ use hokusai_core::{Brush, BrushSetting};
 
 use crate::compositor::srgb_to_linear;
 
-const BUILTIN: [(&str, &str); 3] = [
+const BUILTIN: [(&str, &str); 4] = [
     ("ink", include_str!("../assets/brushes/ink.myb")),
     ("pencil", include_str!("../assets/brushes/pencil.myb")),
     ("soft", include_str!("../assets/brushes/soft.myb")),
+    ("blend", include_str!("../assets/brushes/blend.myb")),
 ];
 
 /// Radius limits, in document pixels.

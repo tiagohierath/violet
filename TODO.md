@@ -514,6 +514,21 @@ Next steps, in order:
   - **Working on it** (Tiago, 2026-10-06: "ok work on that"). All five steps above, in order 5, 1, 2, 3, 4.
 - [ ] **Violet has ONE config file, period.** Like NixOS, and like a Neovim config: the whole app (keys, layout, theme, brush defaults, fonts) is set by a single file, so it is totally reproducible. Noted only, not started. Today's `~/.config/violet/keys.toml` is the first piece; the rest must move into that same file, and nothing may be configured anywhere else.
 
+## Drawing tools backlog (Tiago, 2026-10-06)
+Build one at a time. Each one modular and configurable through the config file, not hardcoded.
+- [ ] Alpha lock: paint only where pixels already exist.
+- [ ] Symmetry / mirror drawing: mirror strokes across an axis or radially.
+- [ ] Stabilizer / lazy brush: tunable per brush, not the four fixed smoothing steps.
+- [ ] Onion skin: faded frames before and after the current one.
+- [ ] Reference layer / tracing image: locked, non-printing, own opacity, flip and scale.
+- [ ] Perspective and ruler guides: snap strokes to vanishing-point lines.
+- [ ] Selection as a mask: saved, inverted, and limiting any later brush or adjustment.
+- [ ] Non-destructive layer adjustments: hue, curves, levels stored as a layer above the paint.
+- [ ] Stroke replay / recording: store each stroke's input, re-render with another brush.
+- [ ] Color history and harmonies: recent colors, plus complementary and triadic from the current one.
+- [ ] Also from the list: select, move/transform, crop, fill, perspective/warp, clipping mask.
+- [ ] All layer blend modes (multiply, screen, overlay, and the rest), set per layer in the config file.
+
 ## Today (2026-10-06)
 - [x] **Geist Sans for the whole UI** (Tiago, 2026-10-06). Embedded Geist-Regular and Geist-Bold (nixpkgs geist-font 1.5.0, OFL-1.1) replace Liberation Sans in `src/theme.rs`. Liberation files kept on disk, no longer used.
 - [x] **Increase/decrease steps are logarithmic, not linear** (Tiago, 2026-10-06). Brush size and opacity keys step multiplicatively (x1.25 / x0.8). Brush opacity and layer opacity sliders map on a log scale from 0.01 to 1 (`opacity_position` in `src/chrome.rs`). Size was already log. Full test suite passes.

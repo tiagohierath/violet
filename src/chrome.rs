@@ -101,14 +101,18 @@ impl Chrome<'_> {
         painter.rect_filled(chip, CornerRadius::ZERO, rgb8(rgb));
         painter.rect_stroke(chip, CornerRadius::ZERO, Stroke::new(1.0, t.border), StrokeKind::Inside);
 
-        // The swatches sit at the bottom; the square takes what is left.
+        // The swatches sit at the bottom; the ring and its square fill the rest.
         let swatch_h = 28.0;
         let swatches_h = 2.0 * swatch_h + 4.0;
-        let hue_h = 20.0;
         let top = title.bottom() + GAP;
-        let side = (rect.bottom() - swatches_h - GAP - hue_h - GAP - top).min(rect.width()).max(32.0);
-        let square = Rect::from_min_size(pos2(rect.center().x - side / 2.0, top), vec2(side, side));
-        let hue_rect = Rect::from_min_size(pos2(rect.left(), square.bottom() + GAP), vec2(rect.width(), hue_h));
+        let bottom = rect.bottom() - swatches_h - GAP;
+        let outer = ((bottom - top).min(rect.width()) / 2.0).max(40.0);
+        let center = pos2(rect.center().x, top + (bottom - top) / 2.0);
+        let ring_w = 16.0;
+        let inner = outer - ring_w;
+        let half = (inner - 8.0) / std::f32::consts::SQRT_2;
+        let square = Rect::from_center_size(center, Vec2::splat(2.0 * half));
+        let ring_box = Rect::from_center_size(center, Vec2::splat(2.0 * outer));
 
         // Hue survives black and gray, where the color alone forgets it.
         let id = Id::new("violet-color-hsv");
@@ -121,11 +125,30 @@ impl Chrome<'_> {
             }
             None => rgb_to_hsv(rgb),
         };
+        let mut changed = false;
+
+        let ring = ui.allocate_rect(ring_box, Sense::click_and_drag());
+        ring_mesh(&painter, center, inner, outer);
+        if ring.is_pointer_button_down_on()
+            && let (Some(origin), Some(p)) = (ui.input(|i| i.pointer.press_origin()), ring.interact_pointer_pos())
+        {
+            let from = origin.distance(center);
+            if (inner..=outer).contains(&from) {
+                let angle = (p.y - center.y).atan2(p.x - center.x);
+                hsv[0] = (angle / std::f32::consts::TAU + 0.25).rem_euclid(1.0);
+                changed = true;
+            }
+        }
+        let mid = (inner + outer) / 2.0;
+        let on_ring = pos2(
+            center.x + mid * (hsv[0] * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2).cos(),
+            center.y + mid * (hsv[0] * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2).sin(),
+        );
+        marker(&painter.with_clip_rect(ring_box.expand(6.0)), t, on_ring);
 
         let sq = ui.allocate_rect(square, Sense::click_and_drag());
         sv_mesh(&painter, square, hsv[0]);
         painter.rect_stroke(square, CornerRadius::ZERO, Stroke::new(1.0, t.border), StrokeKind::Inside);
-        let mut changed = false;
         if sq.is_pointer_button_down_on()
             && let Some(p) = sq.interact_pointer_pos()
         {
@@ -135,20 +158,6 @@ impl Chrome<'_> {
         }
         let at = pos2(square.left() + hsv[1] * square.width(), square.top() + (1.0 - hsv[2]) * square.height());
         marker(&painter.with_clip_rect(square.expand(6.0)), t, at);
-
-        let hue = ui.allocate_rect(hue_rect, Sense::click_and_drag());
-        hue_mesh(&painter, hue_rect);
-        painter.rect_stroke(hue_rect, CornerRadius::ZERO, Stroke::new(1.0, t.border), StrokeKind::Inside);
-        if hue.is_pointer_button_down_on()
-            && let Some(p) = hue.interact_pointer_pos()
-        {
-            hsv[0] = ((p.x - hue_rect.left()) / hue_rect.width()).clamp(0.0, 1.0);
-            changed = true;
-        }
-        let hx = hue_rect.left() + hsv[0] * hue_rect.width();
-        let tick = Rect::from_center_size(pos2(hx, hue_rect.center().y), vec2(6.0, hue_h + 4.0));
-        painter.rect_stroke(tick, CornerRadius::ZERO, Stroke::new(3.0, t.cursor_light), StrokeKind::Middle);
-        painter.rect_stroke(tick, CornerRadius::ZERO, Stroke::new(1.0, t.cursor_dark), StrokeKind::Middle);
 
         let new_rgb = if changed { hsv_to_rgb(hsv) } else { rgb };
         ui.data_mut(|d| d.insert_temp(id, (new_rgb, hsv)));
@@ -250,6 +259,18 @@ impl Chrome<'_> {
         }
 
         line(&p, &mut y, "", t.text);
+
+        let actions = [("new", "layer.add"), ("up", "layer.raise"), ("down", "layer.lower"), ("del", "layer.delete")];
+        for (i, (label, command)) in actions.into_iter().enumerate() {
+            let r = Rect::from_min_size(pos2(rect.left() + i as f32 * 64.0, y), vec2(64.0, LINE));
+            let response = ui.allocate_rect(r, Sense::click()).on_hover_text(self.hint(label, command));
+            let ink = if response.hovered() { t.accent } else { t.text };
+            p.text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, label, mono(), ink);
+            if response.clicked() {
+                out.push(Invocation::new(command, Value::Nil));
+            }
+        }
+        y += LINE;
 
         let doc = &st.doc;
         for layer in doc.layers.iter().rev() {
@@ -454,17 +475,22 @@ fn sv_mesh(p: &egui::Painter, rect: Rect, hue: f32) {
     p.add(Shape::mesh(mesh));
 }
 
-fn hue_mesh(p: &egui::Painter, rect: Rect) {
-    const N: usize = 36;
+fn ring_mesh(p: &egui::Painter, c: Pos2, inner: f32, outer: f32) {
+    const N: usize = 120;
     let mut mesh = Mesh::default();
-    for j in 0..=1 {
-        for i in 0..=N {
-            let h = i as f32 / N as f32;
-            let pos = pos2(rect.left() + h * rect.width(), if j == 0 { rect.top() } else { rect.bottom() });
-            mesh.colored_vertex(pos, rgb8(hsv_to_rgb([h, 1.0, 1.0])));
-        }
+    for i in 0..=N {
+        let h = i as f32 / N as f32;
+        let a = h * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
+        let dir = vec2(a.cos(), a.sin());
+        let color = rgb8(hsv_to_rgb([h, 1.0, 1.0]));
+        mesh.colored_vertex(c + dir * outer, color);
+        mesh.colored_vertex(c + dir * inner, color);
     }
-    grid_triangles(&mut mesh, N, 1);
+    for i in 0..N as u32 {
+        let a = 2 * i;
+        mesh.add_triangle(a, a + 1, a + 2);
+        mesh.add_triangle(a + 1, a + 3, a + 2);
+    }
     p.add(Shape::mesh(mesh));
 }
 

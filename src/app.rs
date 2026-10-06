@@ -472,7 +472,9 @@ impl App {
         for inv in out.drain(..) { self.dispatch(inv); }
 
         let started = Instant::now();
-        let hold = if space {
+        let hold = if space && modifiers.ctrl {
+            Hold::Zoom
+        } else if space {
             Hold::Pan
         } else if self.st.eyedropper || modifiers.ctrl || modifiers.alt {
             Hold::Pick

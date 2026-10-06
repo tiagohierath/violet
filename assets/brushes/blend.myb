@@ -1,0 +1,22 @@
+{
+    "comment": "Violet blend: ink that picks up the paint under it and mixes it with the color.",
+    "group": "violet",
+    "parent_brush_name": "",
+    "settings": {
+        "anti_aliasing": {"base_value": 1.0, "inputs": {}},
+        "dabs_per_actual_radius": {"base_value": 4.0, "inputs": {}},
+        "dabs_per_basic_radius": {"base_value": 0.0, "inputs": {}},
+        "dabs_per_second": {"base_value": 0.0, "inputs": {}},
+        "eraser": {"base_value": 0.0, "inputs": {}},
+        "hardness": {"base_value": 0.92, "inputs": {}},
+        "opaque": {"base_value": 1.0, "inputs": {}},
+        "opaque_linearize": {"base_value": 0.0, "inputs": {}},
+        "opaque_multiply": {"base_value": 1.0, "inputs": {}},
+        "paint_mode": {"base_value": 0.0, "inputs": {}},
+        "radius_logarithmic": {"base_value": 1.4, "inputs": {"pressure": [[0.0, -1.6], [1.0, 0.0]]}},
+        "slow_tracking": {"base_value": 0.0, "inputs": {}},
+        "smudge": {"base_value": 0.5, "inputs": {}},
+        "smudge_length": {"base_value": 0.1, "inputs": {}}
+    },
+    "version": 3
+}

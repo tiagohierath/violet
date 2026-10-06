@@ -20,6 +20,7 @@ struct File {
 }
 
 /// A parsed `"ctrl+shift+z"`.
+#[derive(PartialEq)]
 struct Chord {
     ctrl: bool,
     shift: bool,
@@ -78,6 +79,9 @@ impl Keymap {
         for (chord, line) in file.keys {
             match (parse_chord(&chord), Invocation::parse(&line)) {
                 (Some(parsed), Some(invocation)) => {
+                    if keymap.binds.iter().any(|(bound, _)| *bound == parsed) {
+                        eprintln!("keys: \"{chord}\" is bound twice; the first line wins");
+                    }
                     keymap.binds.push((parsed, invocation));
                     keymap.lines.push((chord, line));
                 }
