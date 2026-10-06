@@ -43,12 +43,9 @@ impl Default for Layout {
         let place = |panel, dock, size, visible| Placement { panel, dock, size, visible };
         Self {
             placements: vec![
-                place("menu", Dock::Top, [28.0, 0.0], true),
-                place("status", Dock::Bottom, [28.0, 0.0], true),
-                place("tools", Dock::Left, [52.0, 0.0], true),
-                place("color", Dock::Right, [280.0, 332.0], true),
-                place("brush", Dock::Right, [280.0, 248.0], true),
-                place("layers", Dock::Right, [280.0, 0.0], true),
+                place("color", Dock::Right, [300.0, 340.0], true),
+                place("info", Dock::Right, [300.0, 0.0], true),
+                place("terminal", Dock::Right, [300.0, 200.0], true),
                 place("perf", Dock::Float { x: 12.0, y: 12.0 }, [360.0, 420.0], true),
             ],
         }
@@ -150,9 +147,9 @@ mod tests {
         let resolved = Layout::default().resolve(screen, |p| p != "perf");
         assert_eq!(
             resolved.canvas,
-            Rect::from_min_max(pos2(52.0, 28.0), pos2(1280.0 - 280.0, 800.0 - 28.0))
+            Rect::from_min_max(Pos2::ZERO, pos2(1280.0 - 300.0, 800.0))
         );
         let color = resolved.panels.iter().find(|(n, _)| *n == "color").map(|(_, r)| *r);
-        assert_eq!(color.map(|c| c.height()), Some(332.0));
+        assert_eq!(color.map(|c| c.height()), Some(340.0));
     }
 }

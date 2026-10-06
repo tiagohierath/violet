@@ -37,5 +37,6 @@
 "5" = "view.rotate-reset"
 "m" = "view.flip"
 "tab" = "ui.chrome"
+"`" = "ui.terminal"
 "f12" = "ui.perf"
 "escape" = "ui.dismiss"

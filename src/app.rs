@@ -83,6 +83,9 @@ pub struct State {
     pub pending: Option<Transition>,
     pub close_ready: bool,
     pub help_open: bool,
+    pub terminal_open: bool,
+    pub terminal_input: String,
+    pub terminal_log: Vec<String>,
 }
 
 impl State {
@@ -259,6 +262,9 @@ impl App {
             pending: None,
             close_ready: false,
             help_open: false,
+            terminal_open: true,
+            terminal_input: String::new(),
+            terminal_log: Vec::new(),
         };
         Self {
             st,
@@ -409,8 +415,10 @@ impl App {
             self.st.startup_ms = Some(self.st.started.elapsed().as_secs_f32() * 1000.0);
         }
 
-        let layout = self.layout.resolve(screen, |name| {
-            if name == "perf" { self.st.perf_open } else { self.st.chrome }
+        let layout = self.layout.resolve(screen, |name| match name {
+            "perf" => self.st.perf_open,
+            "terminal" => self.st.terminal_open,
+            _ => self.st.chrome,
         });
         self.st.canvas = layout.canvas;
         let canvas = self.st.canvas;

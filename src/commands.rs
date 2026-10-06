@@ -243,6 +243,18 @@ const BUILTIN: &[(&str, &str, Run)] = &[
         st.help_open = !st.help_open;
         Ok(Value::Nil)
     }),
+    ("ui.terminal", "show or hide the terminal", |st, _| {
+        st.terminal_open = !st.terminal_open;
+        Ok(Value::Bool(st.terminal_open))
+    }),
+    ("terminal.input", "update terminal input text", |st, args| {
+        if let Some(s) = args.text(0) { st.terminal_input = s.to_owned(); }
+        Ok(Value::Nil)
+    }),
+    ("terminal.log", "append a line to the terminal log", |st, args| {
+        if let Some(s) = args.text(0) { st.terminal_log.push(s.to_owned()); }
+        Ok(Value::Nil)
+    }),
     ("app.quit", "confirm, save and quit", |st, args| {
         stroke_end(st, &Value::Nil)?;
         if args.bool(0) != Some(true) {

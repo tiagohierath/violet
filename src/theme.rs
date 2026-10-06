@@ -138,18 +138,18 @@ impl Theme {
     }
 }
 
-/// Geist Sans for the whole UI, embedded so startup never asks fontconfig
+/// Geist Mono for the whole UI, embedded so startup never asks fontconfig
 /// (ARCHITECTURE §15). egui's own fonts stay behind it as fallbacks.
 fn fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let embed = |bytes: &'static [u8]| Arc::new(FontData::from_static(bytes));
     fonts.font_data.insert(
-        "sans".into(),
-        embed(include_bytes!("../assets/fonts/Geist-Regular.ttf")),
+        "mono".into(),
+        embed(include_bytes!("../assets/fonts/GeistMono-Regular.ttf")),
     );
     fonts.font_data.insert(
-        "sans-bold".into(),
-        embed(include_bytes!("../assets/fonts/Geist-Bold.ttf")),
+        "mono-bold".into(),
+        embed(include_bytes!("../assets/fonts/GeistMono-Bold.ttf")),
     );
     let fallback = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let family = |first: &str| {
@@ -157,7 +157,8 @@ fn fonts() -> FontDefinitions {
         list.extend(fallback.iter().cloned());
         list
     };
-    fonts.families.insert(FontFamily::Proportional, family("sans"));
-    fonts.families.insert(FontFamily::Name("bold".into()), family("sans-bold"));
+    fonts.families.insert(FontFamily::Proportional, family("mono"));
+    fonts.families.insert(FontFamily::Monospace, family("mono"));
+    fonts.families.insert(FontFamily::Name("bold".into()), family("mono-bold"));
     fonts
 }
