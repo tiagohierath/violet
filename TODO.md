@@ -510,6 +510,7 @@ Next steps, in order:
 - [ ] SIMD, against a profile, never before one
 
 ## Decided 2026-10-06 (Tiago): one config file
+- [ ] **Plan for one config file** (Tiago, 2026-10-06). Steps: (1) one loader in `settings.rs` reading `~/.config/violet/config.toml` with sections `[keys]`, `[theme]`, `[layout]`, `[brushes]`, `[fonts]`; the app never writes it. (2) Move the hardcoded colors, sizes and panel layout out of `theme.rs` and `layout.rs` into the sections, defaults shipped in `assets/config.toml`. (3) Keys move from `keys.toml` into `[keys]`. (4) Reproducibility: a flake output (NixOS module or home-manager-style option) that renders the same file from Nix, so the config is declared, not hand-copied. (5) Pin `Cargo.lock` again first, so the build is reproducible too. Open question: keep the file hand-editable in Helix alongside the Nix option.
 - [ ] **Violet has ONE config file, period.** Like NixOS, and like a Neovim config: the whole app (keys, layout, theme, brush defaults, fonts) is set by a single file, so it is totally reproducible. Noted only, not started. Today's `~/.config/violet/keys.toml` is the first piece; the rest must move into that same file, and nothing may be configured anywhere else.
 
 ## Today (2026-10-06)
