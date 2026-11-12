@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+      - name: Build package
+        run: nix build .#default
+      - name: Package release
+        run: |
+          mkdir release
+          cp result/bin/violet release/violet
+          cp result/share/applications/violet.desktop release/violet.desktop
+          tar -C release -czf violet-linux-x86_64.tar.gz violet violet.desktop
+          sha256sum violet-linux-x86_64.tar.gz > violet-linux-x86_64.tar.gz.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            violet-linux-x86_64.tar.gz
+            violet-linux-x86_64.tar.gz.sha256
