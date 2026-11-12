@@ -19,7 +19,26 @@ pen close to the work.
 Violet is early-stage software. Expect rough edges, unfinished tablet behavior,
 and changing file formats.
 
-## Run it
+## Install on Linux
+
+Download and install the latest release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tiagohierath/violet/master/scripts/install.sh | sh
+```
+
+This installs Violet into `~/.local/bin` and adds it to the applications menu.
+It downloads a checksum-verified release and does not require Rust, Cargo, or
+Nix. To remove it later:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tiagohierath/violet/master/scripts/install.sh | sh -s -- --uninstall
+```
+
+Linux x86-64 is supported first. Other platforms will be added when their
+tablet and graphics paths are ready.
+
+## Run from source
 
 The supported development environment is Nix:
 
